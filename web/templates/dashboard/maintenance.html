@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Maintenance{% endblock %}
+{% block content %}
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="h4 m-0"><i class="bi bi-tools me-2"></i>Maintenance Guidance</h2>
+    <span class="badge badge-soft"><i class="bi bi-link-45deg me-1"></i>{{ api_base }}</span>
+  </div>
+
+  <div class="row g-3">
+    {% for r in recs %}
+    <div class="col-12 col-lg-6">
+      <div class="card section-card h-100">
+        <div class="card-header section-title d-flex align-items-center justify-content-between">
+          <div class="d-flex align-items-center"><i class="bi bi-robot me-2 text-primary"></i><span class="fw-semibold">Machine {{ r.machine_id }}</span></div>
+          {% if r.level == 'High' %}
+            <span class="badge text-bg-danger">High</span>
+          {% elif r.level == 'Medium' %}
+            <span class="badge text-bg-warning">Medium</span>
+          {% elif r.level == 'Low' %}
+            <span class="badge text-bg-info">Low</span>
+          {% else %}
+            <span class="badge text-bg-success">Normal</span>
+          {% endif %}
+        </div>
+        <div class="card-body">
+          <div class="mb-2 small text-secondary">
+            Baseline RMSE: {% if r.rmse %}<code>{{ r.rmse|floatformat:3 }}</code>{% else %}<span class="text-body-secondary">n/a</span>{% endif %}
+          </div>
+          <ul class="mb-0">
+            {% for a in r.actions %}
+            <li>{{ a }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+{% endblock %}

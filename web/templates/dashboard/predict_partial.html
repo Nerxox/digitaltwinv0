@@ -1,0 +1,71 @@
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="h4 m-0"><i class="bi bi-graph-up-arrow me-2"></i>Predictions</h2>
+    <span class="badge badge-soft"><i class="bi bi-link-45deg me-1"></i>{{ api_base }}</span>
+  </div>
+
+  <div class="card section-card mb-3">
+    <div class="card-header section-title d-flex align-items-center">
+      <i class="bi bi-sliders me-2 text-primary"></i>
+      <span class="fw-semibold">Parameters</span>
+    </div>
+    <div class="card-body">
+      <form method="post" class="row g-3 align-items-end" hx-post="/predict/" hx-target="#app" hx-push-url="true">
+        {% csrf_token %}
+        <div class="col-12 col-md-6">
+          <label class="form-label">Machine ID(s)</label>
+          <input name="machine_id" class="form-control" placeholder="M001 or M001,M002">
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label">Horizon (min)</label>
+          <input name="horizon_min" class="form-control" placeholder="15 or 1,5,15">
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label">Scope</label>
+          <select name="scope" class="form-select">
+            <option value="per_machine">per_machine</option>
+            <option value="global">global</option>
+          </select>
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label">Algo</label>
+          <select name="algo" class="form-select">
+            <option value="lstm">lstm</option>
+            <option value="gru">gru</option>
+            <option value="xgboost">xgboost</option>
+            <option value="rf">rf</option>
+          </select>
+        </div>
+        <div class="col-6 col-md-3 form-check mt-4">
+          <input class="form-check-input" type="checkbox" name="want_quantiles" id="want_quantiles">
+          <label class="form-check-label" for="want_quantiles">Return quantiles</label>
+        </div>
+        <div class="col-12 d-flex gap-2">
+          <button class="btn btn-primary"><i class="bi bi-lightning-charge me-1"></i>Predict</button>
+          <a class="btn btn-outline-secondary" hx-get="/" hx-target="#app" hx-push-url="true"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-danger"><i class="bi bi-x-circle me-2"></i>{{ error }}</div>
+  {% endif %}
+
+  {% if result %}
+    <div class="card section-card">
+      <div class="card-header section-title d-flex align-items-center">
+        <i class="bi bi-list-ul me-2 text-primary"></i>
+        <span class="fw-semibold">Result</span>
+      </div>
+      <div class="card-body">
+        <pre class="small bg-body-tertiary p-3 rounded border">{{ result|json_script:"predict_result" }}</pre>
+        <script>
+          (function(){
+            const data = JSON.parse(document.getElementById('predict_result').textContent);
+            const pre = document.currentScript.previousElementSibling;
+            pre.textContent = JSON.stringify(data, null, 2);
+          })();
+        </script>
+      </div>
+    </div>
+  {% endif %}

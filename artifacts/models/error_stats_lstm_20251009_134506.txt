@@ -1,0 +1,11 @@
+Error Statistics for LSTM
+==================================================
+Mean Error: 3.1783
+Median Error: 3.0297
+Std Dev of Errors: 2.5489
+Skewness: 1.2059
+Kurtosis: 3.3151
+5th Percentile: -0.7837
+95th Percentile: 7.2158
+MAE: 3.3305
+RMSE: 4.0742

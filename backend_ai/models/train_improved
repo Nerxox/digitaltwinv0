@@ -1,0 +1,305 @@
+# backend_ai/models/train_improved.py
+import logging
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from datetime import datetime
+from typing import Tuple, Dict, Optional, List
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def load_and_validate_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Load and validate training data."""
+    try:
+        train_path = Path("datasets/train.csv")
+        test_path = Path("datasets/test.csv")
+        
+        if not train_path.exists() or not test_path.exists():
+            raise FileNotFoundError("Training or test data not found")
+            
+        train_df = pd.read_csv(train_path, parse_dates=['ts'], index_col='ts')
+        test_df = pd.read_csv(test_path, parse_dates=['ts'], index_col='ts')
+        
+        # Basic validation
+        for df, name in [(train_df, "train"), (test_df, "test")]:
+            if 'power_kw' not in df.columns:
+                raise ValueError(f"Missing 'power_kw' column in {name} data")
+            if df.isnull().any().any():
+                logger.warning(f"Found missing values in {name} data")
+                
+        return train_df, test_df
+    except Exception as e:
+        logger.error(f"Error loading data: {str(e)}")
+        raise
+
+def create_features(df: pd.DataFrame, lags: List[int] = None) -> pd.DataFrame:
+    """
+    Create comprehensive time-series and domain-specific features.
+    
+    Args:
+        df: Input DataFrame with power_kw column and datetime index
+        lags: List of lag periods to create lagged features
+        
+    Returns:
+        DataFrame with additional features
+    """
+    if lags is None:
+        lags = [1, 5, 15, 30, 60, 1440]  # Default lags in minutes
+    
+    df = df.copy()
+    
+    # 1. Basic lagged features
+    for lag in lags:
+        df[f'lag_{lag}'] = df['power_kw'].shift(lag)
+    
+    # 2. Rolling statistics with different windows
+    for window in [15, 30, 60, 240, 1440]:  # 15min to 1 day
+        # Basic statistics
+        df[f'roll_{window}_mean'] = df['power_kw'].rolling(window).mean()
+        df[f'roll_{window}_std'] = df['power_kw'].rolling(window).std()
+        df[f'roll_{window}_min'] = df['power_kw'].rolling(window).min()
+        df[f'roll_{window}_max'] = df['power_kw'].rolling(window).max()
+        
+        # Volatility and change metrics
+        if window > 1:
+            df[f'roll_{window}_range'] = df[f'roll_{window}_max'] - df[f'roll_{window}_min']
+            df[f'roll_{window}_cv'] = df[f'roll_{window}_std'] / (df[f'roll_{window}_mean'] + 1e-6)  # Add small constant to avoid division by zero
+    
+    # 3. Time-based features
+    # Hour of day (circular encoding)
+    df['hour_sin'] = np.sin(2 * np.pi * df.index.hour / 24)
+    df['hour_cos'] = np.cos(2 * np.pi * df.index.hour / 24)
+    
+    # Day of week (circular encoding)
+    df['dow_sin'] = np.sin(2 * np.pi * df.index.dayofweek / 7)
+    df['dow_cos'] = np.cos(2 * np.pi * df.index.dayofweek / 7)
+    
+    # Month (circular encoding)
+    df['month_sin'] = np.sin(2 * np.pi * df.index.month / 12)
+    df['month_cos'] = np.cos(2 * np.pi * df.index.month / 12)
+    
+    # Time of day categories
+    df['is_night'] = ((df.index.hour >= 0) & (df.index.hour <= 5)).astype(int)
+    df['is_morning'] = ((df.index.hour >= 6) & (df.index.hour <= 11)).astype(int)
+    df['is_afternoon'] = ((df.index.hour >= 12) & (df.index.hour <= 17)).astype(int)
+    df['is_evening'] = ((df.index.hour >= 18) & (df.index.hour <= 23)).astype(int)
+    
+    # 4. Calendar features
+    df['is_weekend'] = df.index.dayofweek.isin([5, 6]).astype(int)
+    df['is_weekday'] = ~df.index.dayofweek.isin([5, 6]).astype(int)
+    df['is_month_start'] = (df.index.day == 1).astype(int)
+    df['is_month_end'] = (df.index == df.index + pd.offsets.MonthEnd(0)).astype(int)
+    
+    # 5. Domain-specific features
+    # Daily seasonality (peak/off-peak)
+    df['is_peak_hour'] = ((df.index.hour >= 8) & (df.index.hour <= 20)).astype(int)
+    
+    # Previous day same hour (24-hour seasonality)
+    df['prev_day_same_hour'] = df['power_kw'].shift(24 * 60)  # Assuming data is in minutes
+    
+    # Same hour, previous week (weekly seasonality)
+    df['prev_week_same_hour'] = df['power_kw'].shift(7 * 24 * 60)  # 7 days * 24 hours * 60 minutes
+    
+    # 6. Change and rate of change features
+    df['hourly_change'] = df['power_kw'].diff(60)  # Change from previous hour
+    df['daily_change'] = df['power_kw'].diff(24 * 60)  # Change from same time yesterday
+    
+    # 7. Moving average convergence/divergence (MACD) like features
+    df['ema_12'] = df['power_kw'].ewm(span=12, adjust=False).mean()
+    df['ema_26'] = df['power_kw'].ewm(span=26, adjust=False).mean()
+    df['macd'] = df['ema_12'] - df['ema_26']
+    
+    # 8. Time since last peak/trough
+    df['time_since_peak'] = df['power_kw'].diff().apply(lambda x: 1 if x < 0 else 0).cumsum()
+    
+    # 9. Statistical features
+    df['z_score'] = (df['power_kw'] - df['power_kw'].rolling(1440).mean()) / (df['power_kw'].rolling(1440).std() + 1e-6)
+    
+    # 10. Handle missing values
+    df = df.ffill().bfill().fillna(0)
+    
+    return df
+
+def prepare_data(train_df: pd.DataFrame, test_df: pd.DataFrame, horizon: int) -> tuple:
+    """
+    Prepare data for training and testing.
+    
+    Args:
+        train_df: Training DataFrame
+        test_df: Testing DataFrame
+        horizon: Prediction horizon in minutes
+        
+    Returns:
+        Tuple of (X_train, X_test, y_train, y_test)
+    """
+    # Create features
+    train_features = create_features(train_df)
+    test_features = create_features(test_df)
+    
+    # Align features
+    common_cols = list(set(train_features.columns) & set(test_features.columns))
+    X_train = train_features[common_cols]
+    X_test = test_features[common_cols]
+    
+    # Create targets
+    y_train = train_df['power_kw'].shift(-horizon).dropna()
+    y_test = test_df['power_kw'].shift(-horizon).dropna()
+    
+    # Align features with targets
+    X_train = X_train.loc[y_train.index]
+    X_test = X_test.loc[y_test.index]
+    
+    return X_train, X_test, y_train, y_test
+
+def train_model(X_train: pd.DataFrame, y_train: pd.Series, horizon: int) -> dict:
+    """Train the LSTM model with proper configuration."""
+    from tensorflow.keras.models import Sequential
+    from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
+    from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+    from sklearn.preprocessing import StandardScaler
+    import joblib
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_train)
+    
+    # Reshape for LSTM [samples, timesteps, features]
+    X_reshaped = X_scaled.reshape((X_scaled.shape[0], 1, X_scaled.shape[1]))
+    
+    # Build model
+    model = Sequential([
+        LSTM(64, return_sequences=True, input_shape=(1, X_train.shape[1])),
+        BatchNormalization(),
+        Dropout(0.3),
+        LSTM(32),
+        BatchNormalization(),
+        Dropout(0.3),
+        Dense(16, activation='relu'),
+        Dense(1)
+    ])
+    
+    # Compile model
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    
+    # Callbacks
+    callbacks = [
+        EarlyStopping(patience=10, restore_best_weights=True),
+        ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
+    ]
+    
+    # Train model
+    history = model.fit(
+        X_reshaped, y_train,
+        validation_split=0.2,
+        epochs=100,
+        batch_size=64,
+        callbacks=callbacks,
+        verbose=1
+    )
+    
+    # Save artifacts
+    model_dir = Path("artifacts/models")
+    model_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    model_path = model_dir / f"lstm_h{horizon}_{timestamp}.h5"
+    scaler_path = model_dir / f"scaler_h{horizon}_{timestamp}.pkl"
+    
+    model.save(model_path)
+    joblib.dump(scaler, scaler_path)
+    
+    return {
+        'model': model,
+        'history': history.history,
+        'model_path': str(model_path),
+        'scaler_path': str(scaler_path)
+    }
+
+def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series, horizon: int, scaler_path: str) -> dict:
+    """
+    Evaluate the trained model and log metrics.
+    
+    Args:
+        model: Trained Keras model
+        X_test: Test features
+        y_test: True target values
+        horizon: Prediction horizon in minutes
+        scaler_path: Path to the saved scaler
+        
+    Returns:
+        Dictionary containing evaluation metrics
+    """
+    import joblib
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    import numpy as np
+    
+    try:
+        # Load the scaler
+        scaler = joblib.load(scaler_path)
+        
+        # Scale features
+        X_test_scaled = scaler.transform(X_test)
+        
+        # Reshape for LSTM
+        X_test_reshaped = X_test_scaled.reshape((X_test_scaled.shape[0], 1, X_test_scaled.shape[1]))
+        
+        # Make predictions
+        y_pred = model.predict(X_test_reshaped).flatten()
+        
+        # Calculate metrics
+        mae = mean_absolute_error(y_test, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        r2 = r2_score(y_test, y_pred)
+        
+        # Log metrics
+        logger.info(f"\nEvaluation Metrics for {horizon}-minute horizon:")
+        logger.info(f"MAE: {mae:.4f}")
+        logger.info(f"RMSE: {rmse:.4f}")
+        logger.info(f"R² Score: {r2:.4f}")
+        
+        return {
+            'mae': mae,
+            'rmse': rmse,
+            'r2': r2,
+            'y_true': y_test.values,
+            'y_pred': y_pred
+        }
+        
+    except Exception as e:
+        logger.error(f"Error during model evaluation: {str(e)}")
+        raise
+
+def main():
+    try:
+        logger.info("Starting model training...")
+        
+        # Load and validate data
+        train_df, test_df = load_and_validate_data()
+        
+        # Train for different horizons
+        for horizon in [15]:  # Start with 15-min horizon
+            logger.info(f"Training model for {horizon}-minute horizon")
+            
+            # Prepare data
+            X_train, X_test, y_train, y_test = prepare_data(train_df, test_df, horizon)
+            
+            # Train model
+            result = train_model(X_train, y_train, horizon)
+            
+            # Evaluate
+            evaluate_model(result['model'], X_test, y_test, horizon, result['scaler_path'])
+            
+        logger.info("Training completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Error in training pipeline: {str(e)}")
+        raise
+        
+    except Exception as e:
+        logger.error(f"Error during model evaluation: {str(e)}")
+        raise
+
+if __name__ == "__main__":
+    main()

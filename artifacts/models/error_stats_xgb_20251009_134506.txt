@@ -1,0 +1,11 @@
+Error Statistics for XGB
+==================================================
+Mean Error: -0.3683
+Median Error: -0.6354
+Std Dev of Errors: 2.5210
+Skewness: 1.3234
+Kurtosis: 3.8567
+5th Percentile: -4.2235
+95th Percentile: 3.2608
+MAE: 1.8326
+RMSE: 2.5478

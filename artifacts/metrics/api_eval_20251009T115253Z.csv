@@ -1,0 +1,2 @@
+machine_id,algo,lookback,horizon,mae,mape,smape,rmse,peak_rmse,n,window_minutes
+M004,lstm,12,1,2.357853551566812,14.853623401138686,13.826738038225864,2.357853551566812,2.357853551566812,1,0.0

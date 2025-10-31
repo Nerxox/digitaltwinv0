@@ -1,0 +1,22 @@
+{
+  "lookback": 12,
+  "horizon": 1,
+  "scaler_min": 10.623269417143112,
+  "scaler_max": 44.56085459565614,
+  "top_models": [
+    {
+      "rank": 1,
+      "algo": "gru",
+      "MAE_mean": 1.8881678369158843,
+      "MAE_std": 0.07428883182621028,
+      "machines": 4
+    },
+    {
+      "rank": 2,
+      "algo": "lstm",
+      "MAE_mean": 1.8916763970599098,
+      "MAE_std": 0.07847492390607225,
+      "machines": 4
+    }
+  ]
+}

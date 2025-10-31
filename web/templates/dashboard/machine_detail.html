@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Machine {{ machine_id }}{% endblock %}
+{% block content %}
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="h4 m-0"><i class="bi bi-eye me-2"></i>Machine {{ machine_id }}</h2>
+    <div class="small text-secondary">Baseline RMSE: {% if rmse %}<code>{{ rmse|floatformat:3 }}</code>{% else %}<span>n/a</span>{% endif %}</div>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>{{ error }}</div>
+  {% endif %}
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-6">
+      <div class="card section-card h-100">
+        <div class="card-header section-title d-flex align-items-center"><i class="bi bi-graph-up me-2 text-primary"></i><span class="fw-semibold">Forecast</span></div>
+        <div class="card-body">
+          <canvas id="chart" height="160"></canvas>
+          <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+          <script>
+            (function(){
+              const pts = JSON.parse(document.getElementById('points_data').textContent);
+              const labels = pts.map(p => (p.horizon_min||p.h)+'m');
+              const values = pts.map(p => p.yhat||p.y);
+              const ctx = document.getElementById('chart');
+              new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets: [{ label: 'yhat', data: values, borderColor: '#1d4ed8', backgroundColor: 'rgba(29,78,216,0.12)', tension: 0.35, fill: true, pointRadius: 3 }] },
+                options: { responsive: true, plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } }
+              });
+            })();
+          </script>
+          {{ points|json_script:"points_data" }}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-6">
+      <div class="card section-card mb-3">
+        <div class="card-header section-title d-flex align-items-center"><i class="bi bi-activity me-2 text-primary"></i><span class="fw-semibold">ANN Anomaly Score</span></div>
+        <div class="card-body">
+          {% if ann and ann.score is not None %}
+            <div class="d-flex align-items-center gap-3">
+              <div class="display-6 mb-0">{{ ann.score|floatformat:2 }}</div>
+              <div>
+                <div class="small text-secondary">Threshold: <code>{{ ann.threshold|floatformat:2 }}</code></div>
+                <div class="small text-secondary">Confidence: <code>{{ ann.confidence|floatformat:2 }}</code></div>
+                <div class="mt-1">{% if ann.drift_flag %}<span class="badge text-bg-danger">Anomaly</span>{% else %}<span class="badge text-bg-success">Normal</span>{% endif %}</div>
+              </div>
+            </div>
+          {% else %}
+            <div class="text-secondary">No ANN result available.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card section-card h-100">
+        <div class="card-header section-title d-flex align-items-center"><i class="bi bi-cpu me-2 text-primary"></i><span class="fw-semibold">Prediction Points</span></div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead class="table-light"><tr><th>Horizon</th><th>yhat</th><th>Drift</th></tr></thead>
+              <tbody>
+                {% for p in points %}
+                  <tr>
+                    <td>{{ p.horizon_min }}m</td>
+                    <td>{{ p.yhat|floatformat:3 }}</td>
+                    <td>{% if p.drift_flag %}<span class="badge text-bg-danger">Yes</span>{% else %}<span class="badge text-bg-success">No</span>{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-3"><a href="/anomalies/" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back to Anomalies</a></div>
+{% endblock %}

@@ -1,0 +1,602 @@
+"""
+Energy forecasting with leakage-safe features, robust tree models,
+sequence LSTM (R&D), and production-grade stacking of XGB+LGB.
+
+MIT License – please keep this header.
+"""
+
+import json
+import logging
+from pathlib import Path
+from datetime import datetime
+from typing import Tuple, Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import matplotlib.dates as mdates
+
+from scipy import stats
+from sklearn.metrics import (
+    mean_absolute_error, mean_squared_error, r2_score, mean_absolute_percentage_error
+)
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import Ridge
+import joblib
+
+import xgboost as xgb
+import lightgbm as lgb
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization, Input
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+
+# ---------------------------------------------------------------------
+# Config / Logging
+# ---------------------------------------------------------------------
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("energy_forecast")
+
+np.random.seed(42)
+tf.random.set_seed(42)
+
+# Toggle whether LSTM contributes to the production blend
+USE_LSTM_IN_BLEND = False  # keep trees-only in production unless you flip this
+
+# ---------------------------------------------------------------------
+# Helper: metrics / baseline
+# ---------------------------------------------------------------------
+def metrics_dict(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+    return {
+        "mae": mean_absolute_error(y_true, y_pred),
+        "rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),
+        "r2": r2_score(y_true, y_pred),
+        "mape": mean_absolute_percentage_error(y_true, y_pred) * 100.0,
+    }
+
+def seasonal_naive(y: pd.Series, lag: int) -> np.ndarray:
+    """y_{t} = y_{t-lag} aligned to prediction index; missing values -> nan."""
+    return y.shift(lag).values
+
+def naive_last(y: pd.Series) -> np.ndarray:
+    """y_{t} = y_{t-1}."""
+    return y.shift(1).values
+
+# ---------------------------------------------------------------------
+# Model
+# ---------------------------------------------------------------------
+class EnergyPredictor:
+    def __init__(self,
+                 model_dir: str = "artifacts/models",
+                 target_col: str = "power_kw"):
+        self.model_dir = Path(model_dir)
+        self.model_dir.mkdir(parents=True, exist_ok=True)
+
+        # Separate scaler JUST for LSTM sequences
+        self.lstm_scaler = StandardScaler()
+
+        self.models: Dict[str, object] = {}
+        self.ensemble_weights: Dict[str, float] = {"xgb": 0.5, "lgb": 0.5, "lstm": 0.0}
+        self.meta_model: Optional[Ridge] = None
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        self.target_col = target_col
+        self.feature_cols_: List[str] = []
+
+    # ------------------------- Data I/O -------------------------------
+    def _normalize_dtindex(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Ensure a naive (tz-free) UTC DatetimeIndex, unique + monotonic ascending."""
+        if not isinstance(df.index, pd.DatetimeIndex):
+            raise ValueError("Index must be a DatetimeIndex named 'ts'.")
+        df = df.copy()
+        if df.index.tz is not None:
+            df.index = df.index.tz_convert("UTC").tz_localize(None)
+        # drop duplicates, sort
+        before = len(df)
+        df = df[~df.index.duplicated(keep="first")].sort_index()
+        after = len(df)
+        if after < before:
+            logger.info(f"Dropped {before-after} duplicate timestamp rows.")
+        return df
+
+    def _maybe_resample(self, df: pd.DataFrame) -> pd.DataFrame:
+        """If frequency is irregular but close to a minute grid, resample to 1min with median."""
+        freq = pd.infer_freq(df.index[:30])  # quick sniff
+        if freq is None:
+            logger.info("Index has no clear freq; resampling at 1min with median.")
+            df = df.resample("1min").median()
+        return df
+
+    def load_data(self, train_path: str, test_path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        logger.info("Loading and validating data...")
+        train_df = pd.read_csv(train_path, parse_dates=['ts'], index_col='ts')
+        test_df  = pd.read_csv(test_path,  parse_dates=['ts'], index_col='ts')
+
+        if self.target_col not in train_df.columns or self.target_col not in test_df.columns:
+            raise ValueError(f"Both train and test must contain a '{self.target_col}' column.")
+
+        train_df = self._maybe_resample(self._normalize_dtindex(train_df)).sort_index()
+        test_df  = self._maybe_resample(self._normalize_dtindex(test_df)).sort_index()
+        return train_df, test_df
+
+    # ---------------------- Feature Engineering -----------------------
+    def create_features(self, df: pd.DataFrame, lags: List[int] = None) -> pd.DataFrame:
+        """
+        Leakage-safe engineered features.
+        Adaptive windows so short slices don't degenerate into all-NaN.
+        """
+        tgt = self.target_col
+        if lags is None:
+            lags = [1, 5, 15, 30, 60, 240, 1440]  # minutes (cap adaptively)
+        df = df.copy()
+        n = len(df)
+        if n < 3:
+            return df.assign(
+                hour_sin=np.sin(2*np.pi*df.index.hour/24),
+                hour_cos=np.cos(2*np.pi*df.index.hour/24)
+            )
+
+        # Adapt lags/windows to length
+        lags_use = [L for L in lags if L < n]
+        win_candidates = [15, 30, 60, 240, 1440]
+        wins_use = [w for w in win_candidates if w <= n]
+        if len(wins_use) == 0:
+            wins_use = [max(2, min(15, n//2))]
+
+        # Lags of target
+        for lag in lags_use:
+            df[f'lag_{lag}'] = df[tgt].shift(lag)
+
+        # Rolling stats (backward-looking)
+        for w in wins_use:
+            mp = max(3, w//3)
+            roll = df[tgt].rolling(window=w, min_periods=mp)
+            df[f'roll_{w}_mean'] = roll.mean()
+            df[f'roll_{w}_std']  = roll.std()
+            df[f'roll_{w}_min']  = roll.min()
+            df[f'roll_{w}_max']  = roll.max()
+            df[f'roll_{w}_range'] = df[f'roll_{w}_max'] - df[f'roll_{w}_min']
+            df[f'roll_{w}_cv']    = df[f'roll_{w}_std'] / (df[f'roll_{w}_mean'] + 1e-6)
+
+        # Cyclic encodings
+        idx = df.index
+        df['hour_sin']  = np.sin(2*np.pi*idx.hour/24)
+        df['hour_cos']  = np.cos(2*np.pi*idx.hour/24)
+        df['dow_sin']   = np.sin(2*np.pi*idx.dayofweek/7)
+        df['dow_cos']   = np.cos(2*np.pi*idx.dayofweek/7)
+        df['month_sin'] = np.sin(2*np.pi*idx.month/12)
+        df['month_cos'] = np.cos(2*np.pi*idx.month/12)
+
+        # Categorical flags
+        df['is_night']     = ((idx.hour >= 0)  & (idx.hour <= 5)).astype(int)
+        df['is_morning']   = ((idx.hour >= 6)  & (idx.hour <= 11)).astype(int)
+        df['is_afternoon'] = ((idx.hour >= 12) & (idx.hour <= 17)).astype(int)
+        df['is_evening']   = ((idx.hour >= 18) & (idx.hour <= 23)).astype(int)
+        df['is_weekend']   = idx.dayofweek.isin([5, 6]).astype(int)
+        df['is_weekday']   = (~idx.dayofweek.isin([5, 6])).astype(int)
+
+        # Domain deltas (backward diff only)
+        df['is_peak_hour']  = ((idx.hour >= 8) & (idx.hour <= 20)).astype(int)
+        df['hourly_change'] = df[tgt].diff(min(60, max(1, n//4)))
+        df['daily_change']  = df[tgt].diff(min(24*60, max(1, n//2)))
+
+        return df
+
+    def _dropna_align(self, X: pd.DataFrame, y: pd.Series):
+        idx = X.index.intersection(y.index)
+        X = X.loc[idx]
+        y = y.loc[idx]
+
+        # Drop columns that are entirely NaN on this slice
+        all_nan_cols = X.columns[X.isna().all()]
+        if len(all_nan_cols) > 0:
+            X = X.drop(columns=list(all_nan_cols))
+
+        if X.shape[1] == 0:
+            return X.iloc[0:0], y.iloc[0:0]
+
+        # Keep rows with target and at least 90% non-NaN features
+        row_ok = y.notna() & (X.isna().mean(axis=1) <= 0.10)
+        return X.loc[row_ok], y.loc[row_ok]
+
+    def prepare_data(self, train_df: pd.DataFrame, test_df: pd.DataFrame, horizon: int):
+        logger.info("Preparing data...")
+        tgt = self.target_col
+
+        train_features = self.create_features(train_df)
+        test_features  = self.create_features(test_df)
+
+        # Keep ONLY engineered features (exclude the raw target column from X)
+        common_cols = sorted(set(train_features.columns) & set(test_features.columns))
+        if tgt in common_cols:
+            common_cols.remove(tgt)
+
+        X_train = train_features[common_cols]
+        X_test  = test_features[common_cols]
+
+        y_train = train_df[tgt].shift(-horizon)
+        y_test  = test_df[tgt].shift(-horizon)
+
+        X_train, y_train = self._dropna_align(X_train, y_train)
+        X_test,  y_test  = self._dropna_align(X_test,  y_test)
+
+        # Remember feature list
+        self.feature_cols_ = list(X_train.columns)
+
+        return X_train, X_test, y_train, y_test
+
+    # --------------------- Sequence utilities (LSTM) -------------------
+    @staticmethod
+    def _make_sequences(X_df: pd.DataFrame, y: pd.Series, seq_len: int = 60):
+        X = X_df.values; yv = y.values
+        if len(X) <= seq_len:
+            return np.zeros((0, seq_len, X.shape[1])), np.zeros((0,))
+        xs, ys = [], []
+        for i in range(seq_len, len(X)):
+            xs.append(X[i - seq_len:i, :])
+            ys.append(yv[i])
+        return np.asarray(xs), np.asarray(ys)
+
+    @staticmethod
+    def _time_split(X: pd.DataFrame, y: pd.Series, valid_size: float = 0.2):
+        n = len(X)
+        cut = max(1, int(n * (1 - valid_size)))
+        return X.iloc[:cut], X.iloc[cut:], y.iloc[:cut], y.iloc[cut:]
+
+    def _choose_seq_len(self, X_train_df: pd.DataFrame, X_test_df: pd.DataFrame, base: int = 60) -> int:
+        candidates = [
+            base,
+            max(8, len(X_train_df) // 10),
+            max(8, (len(X_test_df) // 2))
+        ]
+        seq = int(max(8, min(c for c in candidates if c > 0)))
+        seq = min(seq, len(X_train_df) - 1, len(X_test_df) - 1)
+        seq = max(8, seq)
+        logger.info(f"Adaptive seq_len chosen: {seq} (train={len(X_train_df)}, test={len(X_test_df)})")
+        return seq
+
+    # ---------------------------- Training ----------------------------
+    def train_xgboost(self, X_df: pd.DataFrame, y: pd.Series) -> xgb.XGBRegressor:
+        logger.info("Training XGBoost (MAE objective + early stopping)...")
+        X_tr, X_val, y_tr, y_val = self._time_split(X_df, y, valid_size=0.2)
+        model = xgb.XGBRegressor(
+            n_estimators=6000, learning_rate=0.02, max_depth=6,
+            subsample=0.8, colsample_bytree=0.8, reg_lambda=1.0,
+            objective='reg:absoluteerror',  # robust
+            early_stopping_rounds=300, eval_metric='rmse',
+            random_state=42, n_jobs=-1
+        )
+        model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
+        return model
+
+    def train_lightgbm(self, X_df: pd.DataFrame, y: pd.Series) -> lgb.LGBMRegressor:
+        logger.info("Training LightGBM (quantile median + RMSE feval + early stopping)...")
+        X_tr, X_val, y_tr, y_val = self._time_split(X_df, y, valid_size=0.2)
+
+        # For sklearn API, eval_metric callable signature is (y_true, y_pred)
+        def rmse_eval(y_true, y_pred):
+            rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
+            return 'rmse', rmse, False  # False -> lower is better
+
+        model = lgb.LGBMRegressor(
+            n_estimators=6000, learning_rate=0.02, num_leaves=31,
+            subsample=0.8, colsample_bytree=0.8, max_depth=-1,
+            objective='quantile', alpha=0.5,         # median → MAE-like robust
+            min_data_in_leaf=40, min_gain_to_split=1e-3,
+            verbosity=-1, random_state=42, n_jobs=-1
+        )
+        model.fit(
+            X_tr, y_tr,
+            eval_set=[(X_val, y_val)],
+            eval_metric=rmse_eval,
+            callbacks=[lgb.early_stopping(stopping_rounds=300, verbose=False)]
+        )
+        return model
+
+    def train_lstm(self, X_scaled_df: pd.DataFrame, y: pd.Series, seq_len: int = 60) -> Model:
+        logger.info("Training sequence LSTM (R&D, time-safe validation)...")
+        X_seq, y_seq = self._make_sequences(X_scaled_df, y, seq_len=seq_len)
+        if len(X_seq) == 0:
+            raise RuntimeError(f"Not enough samples to build LSTM sequences (seq_len={seq_len}).")
+
+        # Temporal split for sequences
+        n = len(X_seq)
+        cut = int(n * 0.8)
+        X_tr, X_val = X_seq[:cut], X_seq[cut:]
+        y_tr, y_val = y_seq[:cut], y_seq[cut:]
+
+        inputs = Input(shape=(seq_len, X_seq.shape[2]))
+        x = LSTM(128, return_sequences=True)(inputs)
+        x = BatchNormalization()(x); x = Dropout(0.3)(x)
+        x = LSTM(64)(x)
+        x = BatchNormalization()(x); x = Dropout(0.3)(x)
+        x = Dense(64, activation='relu')(x); x = Dropout(0.2)(x)
+        outputs = Dense(1)(x)
+        model = Model(inputs, outputs)
+        model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+        callbacks = [
+            EarlyStopping(patience=20, restore_best_weights=True, monitor='val_loss'),
+            ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=6, min_lr=1e-6)
+        ]
+        model.fit(X_tr, y_tr, validation_data=(X_val, y_val),
+                  epochs=150, batch_size=128, callbacks=callbacks, verbose=False)
+        return model
+
+    def _rolling_stacker(self, xgb_model, lgb_model, X_df: pd.DataFrame, y: pd.Series, n_splits: int = 4):
+        """Expanding-window CV to train meta-learner on trees’ preds."""
+        n = len(X_df)
+        fold_sizes = np.linspace(0.5, 0.9, n_splits)  # use 50%..90% as growing train end
+        P, Y = [], []
+        for fs in fold_sizes:
+            cut = int(n * fs)
+            X_tr, y_tr = X_df.iloc[:cut], y.iloc[:cut]
+            X_val, y_val = X_df.iloc[cut:], y.iloc[cut:]
+            if len(X_val) < 20:
+                continue
+            p_x = xgb_model.predict(X_val)
+            p_l = lgb_model.predict(X_val)
+            P.append(np.c_[p_x, p_l]); Y.append(y_val.values)
+        if len(P) == 0:
+            # Fallback single split
+            X_tr, X_val, y_tr, y_val = self._time_split(X_df, y, valid_size=0.2)
+            P = [np.c_[xgb_model.predict(X_val), lgb_model.predict(X_val)]]
+            Y = [y_val.values]
+        P = np.vstack(P); Y = np.concatenate(Y)
+        meta = Ridge(alpha=0.1)
+        meta.fit(P, Y)
+        return meta
+
+    def train_ensemble(self, X_train_df: pd.DataFrame, y_train: pd.Series, X_test_df: pd.DataFrame):
+        """Fit scalers, train models, and build meta-learner on forward validation."""
+        # Adaptive sequence for LSTM training
+        seq_len = self._choose_seq_len(X_train_df, X_test_df, base=60)
+
+        # === LSTM branch: scale on train only ===
+        X_lstm_train = pd.DataFrame(
+            self.lstm_scaler.fit_transform(X_train_df.values),
+            index=X_train_df.index, columns=X_train_df.columns
+        )
+        lstm_model = self.train_lstm(X_lstm_train, y_train, seq_len=seq_len)
+
+        # === Trees branch: use RAW features (no scaling) ===
+        # Burn-in to align with sequences (so y alignments match across branches)
+        X_tree = X_train_df.iloc[seq_len:]
+        y_tree = y_train.iloc[seq_len:]
+        xgb_model = self.train_xgboost(X_tree, y_tree)
+        lgb_model = self.train_lightgbm(X_tree, y_tree)
+
+        self.models = {"lstm": lstm_model, "xgb": xgb_model, "lgb": lgb_model}
+
+        # Build meta-learner on rolling forward validation
+        self.meta_model = self._rolling_stacker(xgb_model, lgb_model, X_tree, y_tree, n_splits=4)
+
+        # Reference inverse-RMSE weights (on a final split)
+        X_tr, X_val, y_tr, y_val = self._time_split(X_tree, y_tree, valid_size=0.2)
+        pred_xgb_val = xgb_model.predict(X_val)
+        pred_lgb_val = lgb_model.predict(X_val)
+        rmses = {
+            "xgb": np.sqrt(mean_squared_error(y_val, pred_xgb_val)),
+            "lgb": np.sqrt(mean_squared_error(y_val, pred_lgb_val)),
+        }
+        inv = np.array([1/(rmses['xgb']+1e-6), 1/(rmses['lgb']+1e-6)])
+        w = inv / inv.sum()
+        self.ensemble_weights = {"xgb": float(w[0]), "lgb": float(w[1]), "lstm": 0.0}
+        logger.info(f"Reference weights (inverse-RMSE, trees only): {self.ensemble_weights}")
+
+        # Persist artefacts
+        self._save_models()
+        # Save feature list
+        (self.model_dir / f"features_{self.timestamp}.txt").write_text("\n".join(self.feature_cols_))
+        return seq_len
+
+    # --------------------------- Inference ----------------------------
+    def predict_all(self, X_df: pd.DataFrame, seq_len: int) -> Dict[str, np.ndarray]:
+        """Return aligned predictions (length len(X_df) - seq_len)."""
+        if len(X_df) <= seq_len:
+            return {k: np.zeros((0,)) for k in
+                    ["xgb", "lgb", "lstm", "ensemble_mean", "ensemble_weighted",
+                     "ensemble_median", "ensemble_stacked", "production"]}
+
+        # Trees: RAW features
+        X_tree = X_df.iloc[seq_len:]
+        pred_xgb = self.models['xgb'].predict(X_tree)
+        pred_lgb = self.models['lgb'].predict(X_tree)
+
+        # LSTM sequences (scaled)
+        X_scaled = pd.DataFrame(self.lstm_scaler.transform(X_df.values),
+                                index=X_df.index, columns=X_df.columns)
+        X_seq, _ = self._make_sequences(X_scaled, pd.Series(np.zeros(len(X_scaled)), index=X_scaled.index),
+                                        seq_len=seq_len)
+        pred_lstm = self.models['lstm'].predict(X_seq, verbose=False).ravel()
+
+        # Ensembles
+        ens_mean = (pred_xgb + pred_lgb + (pred_lstm if USE_LSTM_IN_BLEND else 0.0)) / (3.0 if USE_LSTM_IN_BLEND else 2.0)
+        w = self.ensemble_weights
+        if USE_LSTM_IN_BLEND:
+            ens_w = w['xgb']*pred_xgb + w['lgb']*pred_lgb + w['lstm']*pred_lstm
+        else:
+            wx, wl = w['xgb'], w['lgb']
+            s = wx + wl if (wx+wl) > 0 else 1.0
+            ens_w = (wx/s)*pred_xgb + (wl/s)*pred_lgb
+
+        # Median blend of trees
+        ens_med = np.median(np.vstack([pred_xgb, pred_lgb]), axis=0)
+
+        # Stacked meta-learner (Ridge) on trees
+        if self.meta_model is not None:
+            ens_stack = self.meta_model.predict(np.c_[pred_xgb, pred_lgb])
+        else:
+            ens_stack = ens_w  # fallback
+
+        # Choose production output: stacked trees
+        production = ens_stack
+
+        return {
+            "xgb": pred_xgb,
+            "lgb": pred_lgb,
+            "lstm": pred_lstm,
+            "ensemble_mean": ens_mean,
+            "ensemble_weighted": ens_w,
+            "ensemble_median": ens_med,
+            "ensemble_stacked": ens_stack,
+            "production": production
+        }
+
+    # ---------------------- Evaluation & Plotting ----------------------
+    def evaluate(self, X_test_df: pd.DataFrame, y_test: pd.Series, seq_len: int):
+        preds = self.predict_all(X_test_df, seq_len)
+        if len(preds["xgb"]) == 0:
+            raise RuntimeError(
+                f"Not enough test samples ({len(X_test_df)}) for seq_len={seq_len}. "
+                f"Enlarge the test window or reduce seq_len."
+            )
+        y_eval = y_test.iloc[seq_len:].values
+
+        results = {}
+        order = ["naive", "seasonal_naive_1440",
+                 "xgb", "lgb", "lstm", "ensemble_median", "ensemble_stacked",
+                 "ensemble_mean", "ensemble_weighted", "production"]
+
+        # Baselines (aligned)
+        naive_pred = naive_last(pd.Series(y_test.values, index=y_test.index))[seq_len:]
+        seas_pred  = seasonal_naive(pd.Series(y_test.values, index=y_test.index), 1440)[seq_len:]
+
+        named_preds = {
+            "naive": naive_pred,
+            "seasonal_naive_1440": seas_pred,
+            **preds
+        }
+
+        for name in order:
+            if name not in named_preds or np.isnan(named_preds[name]).all():
+                continue
+            m = metrics_dict(y_eval, named_preds[name])
+            results[name] = m
+            logger.info(f"{name.upper()} — MAE {m['mae']:.3f} | RMSE {m['rmse']:.3f} | R² {m['r2']:.3f} | MAPE {m['mape']:.2f}%")
+
+        # Save metrics JSON
+        (self.model_dir / f"metrics_{self.timestamp}.json").write_text(json.dumps(results, indent=2))
+        return results, preds, y_eval
+
+    def plot_predictions(self, index: pd.DatetimeIndex, y_true_aligned: np.ndarray,
+                         y_pred: np.ndarray, model_name: str):
+        errors = y_true_aligned - y_pred
+        idx = index[-len(y_true_aligned):]
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 12), gridspec_kw={'height_ratios': [2, 1]})
+        ax1.plot(idx, y_true_aligned, 'b-', label='Actual', linewidth=1.5, alpha=0.8)
+        ax1.plot(idx, y_pred, 'r--', label='Predicted', linewidth=1.2, alpha=0.9)
+
+        rolling_std = pd.Series(errors, index=idx).rolling(window=24*7, min_periods=1).std()
+        ax1.fill_between(idx, y_pred - 2*rolling_std.values, y_pred + 2*rolling_std.values,
+                         color='gray', alpha=0.2, label='≈95% band')
+        ax1.set_title(f"{model_name.upper()} – Actual vs Predicted")
+        ax1.set_ylabel("Power (kW)"); ax1.legend(); ax1.grid(ls='--', alpha=0.5)
+
+        ax2.scatter(idx, errors, s=12, color='green', alpha=0.5)
+        ax2.axhline(0, color='r', ls='--', alpha=0.7)
+        ax2.set_title("Residuals over time"); ax2.set_xlabel("Time"); ax2.set_ylabel("Actual - Predicted")
+        ax2.grid(ls='--', alpha=0.5)
+
+        for ax in (ax1, ax2):
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+
+        plt.tight_layout()
+        out = self.model_dir / f"predictions_residuals_{model_name}_{self.timestamp}.png"
+        plt.savefig(out, dpi=300, bbox_inches='tight'); plt.close()
+        logger.info(f"Saved {out}")
+
+        self._error_distribution(errors, model_name)
+
+    def _error_distribution(self, errors: np.ndarray, model_name: str):
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 6))
+        sns.histplot(errors, kde=True, bins=50, ax=ax1)
+        ax1.axvline(np.mean(errors), color='r', ls='--', label=f"Mean {np.mean(errors):.2f}")
+        ax1.axvline(np.median(errors), color='g', label=f"Median {np.median(errors):.2f}")
+        ax1.set_title(f"{model_name.upper()} Error Distribution")
+        ax1.set_xlabel("Actual - Predicted"); ax1.legend()
+
+        stats.probplot(errors, dist="norm", plot=ax2)
+        text = (f"Mean: {np.mean(errors):.4f}\nStd: {np.std(errors):.4f}\n"
+                f"Skew: {stats.skew(errors):.4f}\nKurtosis: {stats.kurtosis(errors):.4f}")
+        ax2.text(0.05, 0.95, text, transform=ax2.transAxes, va='top',
+                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        ax2.set_title("Q–Q Plot")
+
+        plt.tight_layout()
+        out = self.model_dir / f"error_analysis_{model_name}_{self.timestamp}.png"
+        plt.savefig(out, dpi=300, bbox_inches='tight'); plt.close()
+        logger.info(f"Saved {out}")
+
+    # ------------------------------ Save ------------------------------
+    def _save_models(self):
+        # LSTM native format (R&D)
+        lstm_path = self.model_dir / f"lstm_model_{self.timestamp}.keras"
+        self.models['lstm'].save(lstm_path)
+        logger.info(f"Saved LSTM to {lstm_path}")
+
+        xgb_path = self.model_dir / f"xgb_model_{self.timestamp}.pkl"
+        joblib.dump(self.models['xgb'], xgb_path)
+        logger.info(f"Saved XGB to {xgb_path}")
+
+        lgb_path = self.model_dir / f"lgb_model_{self.timestamp}.pkl"
+        joblib.dump(self.models['lgb'], lgb_path)
+        logger.info(f"Saved LGB to {lgb_path}")
+
+        scaler_path = self.model_dir / f"lstm_scaler_{self.timestamp}.pkl"
+        joblib.dump(self.lstm_scaler, scaler_path)
+        logger.info(f"Saved LSTM scaler to {scaler_path}")
+
+        if self.meta_model is not None:
+            meta_path = self.model_dir / f"stacker_ridge_{self.timestamp}.pkl"
+            joblib.dump(self.meta_model, meta_path)
+            logger.info(f"Saved meta-learner (Ridge) to {meta_path}")
+
+
+# ---------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------
+def main():
+    predictor = EnergyPredictor(
+        model_dir="artifacts/models",
+        target_col="power_kw"  # change here if your new CSV uses a different name
+    )
+
+    # 1) Load data (tz/freq-safe)
+    train_df, test_df = predictor.load_data(
+        train_path="datasets/train.csv",
+        test_path="datasets/test.csv"
+    )
+
+    # 2) Prepare features/targets
+    horizon_min = 15
+    X_train, X_test, y_train, y_test = predictor.prepare_data(train_df, test_df, horizon=horizon_min)
+
+    if len(X_train) < 50:
+        logger.warning(f"Very small training set after feature alignment: {len(X_train)} rows.")
+    if len(X_test) < 30:
+        logger.warning(f"Small test set after feature alignment: {len(X_test)} rows.")
+
+    # 3) Train ensemble with adaptive seq_len and meta-learner
+    seq_len = predictor.train_ensemble(X_train, y_train, X_test)
+
+    # 4) Evaluate & plot (aligned)
+    results, preds, y_eval = predictor.evaluate(X_test, y_test, seq_len=seq_len)
+    idx = X_test.index  # full index; plotter aligns internally
+
+    # Save plots for key outputs
+    for name in ["xgb", "lgb", "lstm", "ensemble_median", "ensemble_stacked", "production"]:
+        if name in preds and len(preds[name]) == len(y_eval):
+            predictor.plot_predictions(idx, y_eval, preds[name], model_name=name)
+
+    logger.info("Training and evaluation completed successfully.")
+    logger.info(f"Final production model: stacked blend of XGB+LGB (Ridge).")
+    logger.info(f"LSTM included in production blend? {USE_LSTM_IN_BLEND}")
+
+
+if __name__ == "__main__":
+    main()

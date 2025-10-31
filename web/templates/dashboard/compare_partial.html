@@ -1,0 +1,104 @@
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="h4 m-0"><i class="bi bi-sliders me-2"></i>Compare Models</h2>
+    <span class="badge badge-soft"><i class="bi bi-link-45deg me-1"></i>{{ api_base }}</span>
+  </div>
+
+  <div class="card section-card mb-3">
+    <div class="card-header section-title d-flex align-items-center"><i class="bi bi-funnel me-2 text-primary"></i><span class="fw-semibold">Parameters</span></div>
+    <div class="card-body">
+      <form method="get" class="row g-3 align-items-end" hx-get="/compare/" hx-target="#app" hx-push-url="true">
+        <div class="col-12 col-sm-4">
+          <label class="form-label">Machine</label>
+          <select name="machine" class="form-select">
+            {% for m in machines %}
+              <option value="{{ m }}" {% if m == selected_machine %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12 col-sm-4">
+          <label class="form-label">Horizons (min)</label>
+          <input name="horizons" class="form-control" value="{{ horizons|join:"," }}" placeholder="5,15,30">
+        </div>
+        <div class="col-12 col-sm-4">
+          <label class="form-label">Algorithms</label>
+          <input name="algos" class="form-control" value="{{ algos|join:"," }}" placeholder="lstm,gru,xgboost,rf">
+        </div>
+        <div class="col-12 d-flex gap-2">
+          <button class="btn btn-primary"><i class="bi bi-arrow-repeat me-1"></i>Update</button>
+          <a hx-get="/predict/" hx-target="#app" hx-push-url="true" class="btn btn-outline-secondary"><i class="bi bi-graph-up-arrow me-1"></i>Predictions</a>
+        </div>
+      </form>
+      <div class="small text-secondary mt-2">Tip: Provide comma-separated algos to compare (e.g., <code>lstm,gru,xgboost,rf</code>).</div>
+    </div>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>{{ error }}</div>
+  {% endif %}
+
+  {% if series and series.items %}
+    <div class="row g-3">
+      <div class="col-12 col-lg-6">
+        <div class="card section-card h-100">
+          <div class="card-header section-title d-flex align-items-center"><i class="bi bi-table me-2 text-primary"></i><span class="fw-semibold">Metrics Table</span></div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead class="table-light"><tr><th>Algo</th><th>Horizon</th><th>MAE</th><th>RMSE</th><th>MAPE</th><th>SMAPE</th></tr></thead>
+                <tbody>
+                {% for algo, mets in series.items %}
+                  {% for h, m in mets.items %}
+                    <tr>
+                      <td><span class="badge text-bg-secondary">{{ algo }}</span></td>
+                      <td>{{ h }}m</td>
+                      <td>{{ m.mae|floatformat:4 }}</td>
+                      <td>{{ m.rmse|floatformat:4 }}</td>
+                      <td>{{ m.mape|floatformat:2 }}%</td>
+                      <td>{{ m.smape|floatformat:2 }}%</td>
+                    </tr>
+                  {% endfor %}
+                {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-lg-6">
+        <div class="card section-card h-100">
+          <div class="card-header section-title d-flex align-items-center"><i class="bi bi-graph-up me-2 text-primary"></i><span class="fw-semibold">Metrics Chart</span></div>
+          <div class="card-body">
+            <canvas id="cmpChart" height="160"></canvas>
+            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+            <script>
+              (function(){
+                const series = JSON.parse(document.getElementById('series_data').textContent);
+                const horizons = Array.from(new Set(Object.values(series).flatMap(m => Object.keys(m)))).map(x=>parseInt(x)).sort((a,b)=>a-b);
+                const labels = horizons.map(h => h + 'm');
+                const palette = ['#2563eb','#16a34a','#f59e0b','#ef4444','#7c3aed','#0ea5e9'];
+                const datasets = [];
+                const algos = Object.keys(series);
+                algos.forEach((algo, i)=>{
+                  const mets = series[algo]||{};
+                  const rmseVals = horizons.map(h => (mets[h]?.rmse) ?? (mets[String(h)]?.rmse) ?? null);
+                  datasets.push({
+                    label: algo.toUpperCase()+ ' RMSE',
+                    data: rmseVals,
+                    borderColor: palette[i % palette.length],
+                    backgroundColor: palette[i % palette.length] + '22',
+                    tension: 0.35, fill: true
+                  });
+                });
+                const ctx = document.getElementById('cmpChart');
+                new Chart(ctx, { type: 'line', data: { labels, datasets }, options: {responsive:true, plugins:{legend:{display:true}}, scales:{y:{beginAtZero:true}}} });
+              })();
+            </script>
+            {{ series|json_script:"series_data" }}
+          </div>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <div class="alert alert-info"><i class="bi bi-info-circle me-2"></i>No metrics yet. Ensure FastAPI is running and try again.</div>
+  {% endif %}

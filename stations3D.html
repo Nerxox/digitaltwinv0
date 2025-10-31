@@ -1,0 +1,1483 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Factory Digital Twin Dashboard</title>
+<style>
+  :root {
+    --page-bg: #0b1220;            /* midnight navy */
+    --panel-bg: rgba(255,255,255,0.92);
+    --panel-border: rgba(0,0,0,0.12);
+    --text-main: #0b1220;          /* deep navy text */
+    --text-dim: #4a5568;           /* muted gray-blue */
+    --kpi-bg: rgba(255,255,255,0.6);
+    --kpi-border: rgba(0,0,0,0.08);
+
+    --accent-good: #00b84a;
+    --accent-bad:  #d80a2e;
+    --accent-warn: #b58900;
+    --accent-paused: #b58900;
+  }
+
+  body {
+    margin:0;
+    overflow:hidden;
+    background:var(--page-bg);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color:var(--text-main);
+  }
+
+  #panel {
+    position:fixed;
+    top:16px;
+    left:16px;
+    width:285px;
+    background:var(--panel-bg);
+    border:1px solid var(--panel-border);
+    border-radius:12px;
+    box-shadow:0 32px 80px rgba(0,0,0,0.6);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    padding:16px;
+    font-size:13px;
+    line-height:1.4;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    z-index:10;
+  }
+
+  .panel-header {
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+
+  .title-row {
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+  }
+
+  .panel-title {
+    line-height:1.2;
+  }
+
+  .panel-name {
+    font-size:14px;
+    font-weight:600;
+    letter-spacing:0.03em;
+    color:var(--text-main);
+  }
+
+  .panel-sub {
+    font-size:11px;
+    color:var(--text-dim);
+    font-weight:400;
+  }
+
+  .status-chip {
+    min-width:70px;
+    font-size:11px;
+    line-height:1.2;
+    font-weight:600;
+    text-align:center;
+    border-radius:6px;
+    padding:4px 6px;
+    border:1px solid var(--panel-border);
+    background:#fff;
+    color:var(--text-main);
+  }
+
+  .machine-picker {
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+  }
+  .machine-picker label {
+    font-size:11px;
+    color:var(--text-dim);
+  }
+  #cellSelect {
+    width:100%;
+    background:#fff;
+    border:1px solid var(--panel-border);
+    border-radius:8px;
+    padding:6px 8px;
+    font-size:12px;
+    color:var(--text-main);
+    outline:none;
+    cursor:pointer;
+  }
+
+  .kpi-grid {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+  }
+
+  .kpi-card {
+    background:var(--kpi-bg);
+    border:1px solid var(--kpi-border);
+    border-radius:8px;
+    padding:8px;
+    display:flex;
+    flex-direction:column;
+    min-height:60px;
+  }
+
+  .kpi-label {
+    font-size:11px;
+    color:var(--text-dim);
+    display:flex;
+    justify-content:space-between;
+    line-height:1.2;
+  }
+
+  .kpi-value {
+    margin-top:4px;
+    font-size:16px;
+    font-weight:600;
+    letter-spacing:-0.03em;
+    display:flex;
+    align-items:baseline;
+    gap:6px;
+    color:var(--text-main);
+  }
+
+  .goodVal { color:var(--accent-good); }
+  .badVal  { color:var(--accent-bad);  }
+  .neutralVal { color:var(--text-main); }
+
+  .row-flex {
+    display:flex;
+    justify-content:space-between;
+    font-family:monospace;
+    font-size:12px;
+    background:var(--kpi-bg);
+    border:1px solid var(--kpi-border);
+    border-radius:8px;
+    padding:8px;
+    color:var(--text-main);
+  }
+  .row-flex span:first-child {
+    color:var(--text-dim);
+    padding-right:8px;
+  }
+
+  .delay-block {
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+  #btnDelay {
+    width:100%;
+    padding:8px 10px;
+    border-radius:8px;
+    border:1px solid var(--panel-border);
+    background:#fff;
+    color:var(--text-main);
+    cursor:pointer;
+    font-weight:600;
+    font-size:12px;
+    text-align:center;
+  }
+  #btnDelay.active {
+    background:#fff8d2;
+    color:var(--accent-paused);
+    border-color:var(--accent-paused);
+  }
+  .delay-hint {
+    font-size:11px;
+    color:var(--text-dim);
+    line-height:1.4;
+  }
+
+  .legend-block {
+    background:var(--kpi-bg);
+    border:1px solid var(--kpi-border);
+    border-radius:8px;
+    padding:8px;
+    font-size:11px;
+    color:var(--text-main);
+    line-height:1.4;
+  }
+
+  .legend-line {
+    display:flex;
+    align-items:flex-start;
+    margin-bottom:4px;
+    gap:6px;
+    font-size:11px;
+    line-height:1.4;
+    color:var(--text-main);
+  }
+
+  .dot {
+    width:9px;
+    height:9px;
+    border-radius:2px;
+    flex-shrink:0;
+  }
+  .dot.pass { background:#00ff66; }
+  .dot.reject { background:#ff0033; }
+
+  .hint-block {
+    font-size:10px;
+    color:var(--text-dim);
+    line-height:1.4;
+  }
+  .hint-block b {
+    color:var(--text-main);
+    font-weight:500;
+  }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <div class="panel-header">
+    <div class="title-row">
+      <div class="panel-title">
+        <div id="panelCellName" class="panel-name">Sorting Cell</div>
+        <div class="panel-sub">Digital Twin View</div>
+      </div>
+      <div id="statusChip" class="status-chip">RUNNING</div>
+    </div>
+
+    <div class="machine-picker">
+      <label for="cellSelect">Cell / Machine</label>
+      <select id="cellSelect">
+        <option value="sorting">Sorting Cell</option>
+        <option value="packaging">Palletizing Cell</option>
+        <option value="cnc">CNC Machining Cell</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">
+        <span>Good / Pass</span>
+        <span style="color:var(--accent-good)">✔</span>
+      </div>
+      <div class="kpi-value">
+        <span id="goodCount" class="goodVal">0</span>
+        <span style="font-size:11px;color:var(--text-dim);">pcs</span>
+      </div>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-label">
+        <span>Reject / Scrap</span>
+        <span style="color:var(--accent-bad)">✖</span>
+      </div>
+      <div class="kpi-value">
+        <span id="badCount" class="badVal">0</span>
+        <span style="font-size:11px;color:var(--text-dim);">pcs</span>
+      </div>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-label">
+        <span>In Process</span>
+        <span style="color:var(--text-dim)">↻</span>
+      </div>
+      <div class="kpi-value">
+        <span id="activeCount" class="neutralVal">0</span>
+        <span style="font-size:11px;color:var(--text-dim);">pcs</span>
+      </div>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-label">
+        <span>Reject Streak / Cycle</span>
+        <span style="color:var(--accent-warn)">!</span>
+      </div>
+      <div class="kpi-value">
+        <span id="streak" class="neutralVal">0</span>
+        <span style="font-size:11px;color:var(--text-dim);">cnt</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="row-flex">
+    <span>Last decision / State</span>
+    <span id="lastDecision" style="text-align:right;">—</span>
+  </div>
+
+  <div class="delay-block">
+    <button id="btnDelay" title="Toggle delay (keyboard: D)">⏸ Delay feed</button>
+    <div class="delay-hint">
+      Delay pauses new load into this selected cell only. Use this during energy peak shaving / controlled stop.
+    </div>
+  </div>
+
+  <div class="legend-block">
+    <div class="legend-line">
+      <span class="dot pass"></span>
+      <span><strong>PASS</strong> → forward/outfeed/next step</span>
+    </div>
+    <div class="legend-line">
+      <span class="dot reject"></span>
+      <span><strong>REJECT</strong> → diverted to scrap bin</span>
+    </div>
+    <div class="hint-block">
+      Drag rotate • Wheel zoom • Right click pan • <b>D</b> toggle delay
+    </div>
+  </div>
+</div>
+
+<!-- three.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+/* Minimal OrbitControls (inline, no external import) */
+function OrbitControls(object, domElement){
+  this.object=object; this.domElement=domElement;
+  this.enabled=true; this.target=new THREE.Vector3(0,1,0);
+  this.minDistance=2; this.maxDistance=60;
+  this.minPolarAngle=0; this.maxPolarAngle=Math.PI*0.49;
+  this.enableDamping=true; this.dampingFactor=.08;
+  this.enableZoom=true; this.zoomSpeed=1;
+  this.enableRotate=true; this.rotateSpeed=.4;
+  this.enablePan=true; this.panSpeed=.4;
+  const scope=this,STATE={NONE:-1,ROTATE:0,DOLLY:1,PAN:2}; let state=STATE.NONE;
+  const sph=new THREE.Spherical(),dSph=new THREE.Spherical();let scale=1,panOff=new THREE.Vector3();
+  const rS=new THREE.Vector2(),rE=new THREE.Vector2(),rD=new THREE.Vector2();
+  const pS=new THREE.Vector2(),pE=new THREE.Vector2(),pD=new THREE.Vector2();
+  const dS=new THREE.Vector2(),dE=new THREE.Vector2(),dD=new THREE.Vector2();
+  this.update=function(){
+    const off=new THREE.Vector3();off.copy(scope.object.position).sub(scope.target);
+    sph.setFromVector3(off);
+    if(scope.enableDamping){sph.theta+=dSph.theta*scope.dampingFactor; sph.phi+=dSph.phi*scope.dampingFactor;}
+    else{sph.theta+=dSph.theta; sph.phi+=dSph.phi;}
+    sph.phi=Math.max(scope.minPolarAngle,Math.min(scope.maxPolarAngle,sph.phi));sph.makeSafe();
+    sph.radius*=scale;sph.radius=Math.max(scope.minDistance,Math.min(scope.maxDistance,sph.radius));
+    if(scope.enableDamping){scope.target.addScaledVector(panOff,scope.dampingFactor);}else{scope.target.add(panOff);}
+    off.setFromSpherical(sph);off.add(scope.target);scope.object.position.copy(off);scope.object.lookAt(scope.target);
+    if(scope.enableDamping){dSph.theta*=(1-scope.dampingFactor);dSph.phi*=(1-scope.dampingFactor);panOff.multiplyScalar(1-scope.dampingFactor);}
+    else{dSph.set(0,0,0);panOff.set(0,0,0);}scale=1;
+  };
+  function pan(dx,dy){
+    const el=scope.domElement;
+    const off=new THREE.Vector3();off.copy(scope.object.position).sub(scope.target);
+    const dist=off.length()*Math.tan((scope.object.fov/2)*Math.PI/180);
+    const panX=2*dx*dist/el.clientHeight, panY=2*dy*dist/el.clientHeight;
+    const xAx=new THREE.Vector3().setFromMatrixColumn(scope.object.matrix,0).multiplyScalar(-panX);
+    const yAx=new THREE.Vector3().setFromMatrixColumn(scope.object.matrix,1).multiplyScalar(panY);
+    panOff.add(xAx).add(yAx);
+  }
+  function dollyIn(){scale/=1.1;}function dollyOut(){scale*=1.1;}
+  function onDown(e){
+    if(!scope.enabled)return;
+    if(e.button===0&&scope.enableRotate){rS.set(e.clientX,e.clientY);state=STATE.ROTATE;}
+    if(e.button===1&&scope.enableZoom){dS.set(e.clientX,e.clientY);state=STATE.DOLLY;}
+    if(e.button===2&&scope.enablePan){pS.set(e.clientX,e.clientY);state=STATE.PAN;}
+    domElement.addEventListener('mousemove',onMove);domElement.addEventListener('mouseup',onUp);
+  }
+  function onMove(e){
+    if(!scope.enabled)return;
+    if(state===STATE.ROTATE&&scope.enableRotate){
+      rE.set(e.clientX,e.clientY);rD.subVectors(rE,rS).multiplyScalar(scope.rotateSpeed*0.005);
+      dSph.theta-=rD.x;dSph.phi-=rD.y;rS.copy(rE);
+    }
+    if(state===STATE.DOLLY&&scope.enableZoom){
+      dE.set(e.clientX,e.clientY);dD.subVectors(dE,dS);(dD.y>0?dollyIn():dollyOut());dS.copy(dE);
+    }
+    if(state===STATE.PAN&&scope.enablePan){
+      pE.set(e.clientX,e.clientY);pD.subVectors(pE,pS).multiplyScalar(scope.panSpeed*0.002);
+      pan(pD.x,pD.y);pS.copy(pE);
+    }
+  }
+  function onUp(){
+    domElement.removeEventListener('mousemove',onMove);
+    domElement.removeEventListener('mouseup',onUp);
+    state=STATE.NONE;
+  }
+  function onWheel(e){(e.deltaY<0?dollyOut():dollyIn());}
+  domElement.addEventListener('mousedown',onDown);
+  domElement.addEventListener('wheel',onWheel,{passive:true});
+  domElement.addEventListener('contextmenu', e=>e.preventDefault());
+}
+</script>
+
+<script>
+/* ===== SCENE SETUP (midnight blue floor w/ light grid) ===== */
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1220); // same midnight tone
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 200);
+camera.position.set(0,12,28);        // pull back to see all 3 cells
+camera.lookAt(0,1,0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0,1,0);
+controls.minDistance=5;
+controls.maxDistance=80;
+controls.maxPolarAngle=Math.PI*0.49;
+controls.enableDamping=true;
+controls.dampingFactor=.08;
+controls.update();
+
+// overhead / ambient shop lighting
+const keyLight = new THREE.DirectionalLight(0xffffff,1.1);
+keyLight.position.set(10,20,10);
+keyLight.castShadow = true;
+scene.add(keyLight);
+
+const fillLight = new THREE.HemisphereLight(0x7a8cff, 0x1a1f30, 0.6);
+scene.add(fillLight);
+
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(100,60),
+  new THREE.MeshPhongMaterial({
+    color:0x1a2338,   // navy concrete
+    shininess:10
+  })
+);
+floor.rotation.x = -Math.PI/2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// subtle grid so you see orientation (light blue lines)
+const grid = new THREE.GridHelper(100, 50, 0x3a4a6e, 0x1a2338);
+grid.position.y = 0.01;
+scene.add(grid);
+
+/* ===== UI ELEMENT REFS ===== */
+
+const goodCountEl   = document.getElementById("goodCount");
+const badCountEl    = document.getElementById("badCount");
+const activeCountEl = document.getElementById("activeCount");
+const streakEl      = document.getElementById("streak");
+const lastDecisionEl= document.getElementById("lastDecision");
+const statusChipEl  = document.getElementById("statusChip");
+const panelCellName = document.getElementById("panelCellName");
+const btnDelay      = document.getElementById("btnDelay");
+const cellSelect    = document.getElementById("cellSelect");
+
+/* ===== HELPERS: hazard texture, fence, tower light ===== */
+
+function makeHazardTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle='#222';
+  g.fillRect(0,0,128,64);
+  for(let i=0;i<8;i++){
+    g.fillStyle=(i%2===0)?'#ffcc00':'#222';
+    g.beginPath();
+    g.moveTo(i*16,0);
+    g.lineTo(i*16+16,0);
+    g.lineTo(i*16,64);
+    g.closePath();
+    g.fill();
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+// safety fence rectangle around given corners
+function makeSafetyFenceRect(parent, corners, colorHex){
+  const mat = new THREE.MeshPhongMaterial({color:colorHex||0xffcc00});
+  for (let i=0;i<corners.length;i++){
+    const c = corners[i];
+    const post = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08,1.2,0.08),
+      mat
+    );
+    post.position.set(c.x,0.6,c.z);
+    post.castShadow=true;post.receiveShadow=true;
+    parent.add(post);
+  }
+  function rail(p1,p2,h){
+    const rail = new THREE.Mesh(
+      new THREE.CylinderGeometry(.05,.05,1,8),
+      mat
+    );
+    // We'll just place & orient visually, simpler: midpoint and lookAt
+    const mid = new THREE.Vector3(
+      (p1.x+p2.x)/2,
+      h,
+      (p1.z+p2.z)/2
+    );
+    rail.position.copy(mid);
+    rail.lookAt(p2.x,h,p2.z);
+    rail.rotateX(Math.PI/2);
+    // scale along length
+    const len = new THREE.Vector3(p2.x-p1.x,0,p2.z-p1.z).length();
+    rail.scale.set(1,len,1);
+    rail.castShadow=true;rail.receiveShadow=true;
+    parent.add(rail);
+  }
+  for (let i=0;i<corners.length;i++){
+    const j=(i+1)%corners.length;
+    rail(corners[i],corners[j],1.0);
+    rail(corners[i],corners[j],0.5);
+  }
+}
+
+// tower light (mounted on the machine's group)
+function makeTowerLight(parent, localPos){
+  const towerGroup = new THREE.Group();
+  towerGroup.position.copy(localPos);
+
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(.07,.07,2,12),
+    new THREE.MeshPhongMaterial({color:0x444444,shininess:20})
+  );
+  pole.position.y = 1;
+  pole.castShadow = true;
+  towerGroup.add(pole);
+
+  function seg(hex,y,inten){
+    const mat = new THREE.MeshPhongMaterial({
+      color:hex,
+      emissive:hex,
+      emissiveIntensity:inten,
+      shininess:80
+    });
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(.15,.15,.3,16),
+      mat
+    );
+    mesh.position.y = y;
+    mesh.castShadow=true;
+    towerGroup.add(mesh);
+    return mat;
+  }
+
+  const greenMat  = seg(0x00ff55,2.0,.6);
+  const yellowMat = seg(0xffee00,2.4,.15);
+  const redMat    = seg(0xff0033,2.8,.05);
+
+  parent.add(towerGroup);
+
+  return {
+    setStatusRunning(){
+      greenMat.emissiveIntensity  = 0.6;
+      yellowMat.emissiveIntensity = 0.15;
+      redMat.emissiveIntensity    = 0.05;
+    },
+    setStatusDelay(timeMs){
+      const pulse = 0.3 + 0.4*(0.5+0.5*Math.sin(timeMs/400));
+      yellowMat.emissiveIntensity = pulse;
+      redMat.emissiveIntensity    = 0.05;
+      greenMat.emissiveIntensity  = 0.05;
+    },
+    setStatusWarn(timeMs){
+      const pulse = 0.25 + 0.35*(0.5+0.5*Math.sin(timeMs/500));
+      yellowMat.emissiveIntensity = pulse;
+      redMat.emissiveIntensity    = 0.05;
+      greenMat.emissiveIntensity  = 0.15;
+    },
+    setStatusAlarm(timeMs){
+      const flash = 0.2 + 0.8*(0.5+0.5*Math.sin(timeMs/200));
+      redMat.emissiveIntensity    = flash;
+      yellowMat.emissiveIntensity = 0.1;
+      greenMat.emissiveIntensity  = 0.05;
+    }
+  };
+}
+
+/* ===== PER-CELL OBJECT INTERFACE =====
+Each cell builder returns:
+{
+  name: "Sorting Cell",
+  group: THREE.Group,
+  tick(dtMs),
+  toggleDelay(),
+  setDelay(flag),
+  getDelay(),
+  getKPIs() -> {good,bad,active,streak,lastText},
+  getStatus(timeMs) -> {label,bg,border,color}
+}
+All cells run all the time on the floor.
+We just choose which cell's KPIs to show in the panel.
+*/
+
+/* ---------- SORTING CELL (QA + reject station) ---------- */
+function buildSortingCell(offsetX){
+  const group = new THREE.Group();
+  group.position.set(offsetX,0,0);
+  scene.add(group);
+
+  // state
+  let parts = [];
+  let goodCount = 0;
+  let badCount  = 0;
+  let rejectStreak = 0;
+  let lastDecision = "—";
+  let spawnTimer = 0;
+  let delayMode = false;
+
+  const WARN_STREAK  = 3;
+  const ALARM_STREAK = 5;
+
+  // conveyor bed (aluminum frame, guarded)
+  const beltBody = new THREE.Mesh(
+    new THREE.BoxGeometry(2,0.15,14),
+    new THREE.MeshPhongMaterial({color:0x2f2f2f, shininess:20})
+  );
+  beltBody.position.set(0,0.75,-1);
+  beltBody.castShadow=true;beltBody.receiveShadow=true;
+  group.add(beltBody);
+
+  // side frame rails (extrusion look)
+  function sideRail(x){
+    const rail = new THREE.Mesh(
+      new THREE.BoxGeometry(.08,.5,14),
+      new THREE.MeshPhongMaterial({color:0x9a9a9a, shininess:80})
+    );
+    rail.position.set(x,1.05,-1);
+    rail.castShadow=true;rail.receiveShadow=true;
+    group.add(rail);
+  }
+  sideRail(-1.05); sideRail(1.05);
+
+  // legs
+  function frameLeg(x,z){
+    const leg = new THREE.Mesh(
+      new THREE.BoxGeometry(.12,1,.12),
+      new THREE.MeshPhongMaterial({color:0x777777, shininess:60})
+    );
+    leg.position.set(x,0.5,z);
+    leg.castShadow=true;leg.receiveShadow=true;
+    group.add(leg);
+
+    const foot = new THREE.Mesh(
+      new THREE.BoxGeometry(.4,.05,.4),
+      new THREE.MeshPhongMaterial({color:0x555555})
+    );
+    foot.position.set(x,.03,z);
+    foot.castShadow=true;foot.receiveShadow=true;
+    group.add(foot);
+  }
+  frameLeg(-.8,-6); frameLeg(.8,-2); frameLeg(-.8,2); frameLeg(.8,5);
+
+  // rollers
+  function roller(z,color){
+    const r = new THREE.Mesh(
+      new THREE.CylinderGeometry(.22,.22,2,20),
+      new THREE.MeshPhongMaterial({color:color||0x444444, shininess:50})
+    );
+    r.rotation.z = Math.PI/2;
+    r.position.set(0,0.75,z);
+    r.castShadow=true;r.receiveShadow=true;
+    group.add(r);
+  }
+  roller(-8);
+  roller(5,0x555577);
+
+  // motor drive box
+  const motorBox = new THREE.Mesh(
+    new THREE.BoxGeometry(1,.6,.6),
+    new THREE.MeshPhongMaterial({color:0x222244,emissive:0x000022,emissiveIntensity:.3})
+  );
+  motorBox.position.set(1.2,1.0,5);
+  motorBox.castShadow=true;motorBox.receiveShadow=true;
+  group.add(motorBox);
+
+  // hazard sticker on drive
+  const hazardSign = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.5,0.25),
+    new THREE.MeshBasicMaterial({map:makeHazardTexture(), side:THREE.DoubleSide})
+  );
+  hazardSign.position.set(1.7,1.15,5);
+  hazardSign.rotation.y = -Math.PI/2;
+  group.add(hazardSign);
+
+  // photoeye / sensor post
+  const sensorPost = new THREE.Mesh(
+    new THREE.BoxGeometry(0.07,0.5,0.07),
+    new THREE.MeshPhongMaterial({color:0x999999, shininess:80})
+  );
+  sensorPost.position.set(-0.6,1.0,-6.5);
+  sensorPost.castShadow=true;sensorPost.receiveShadow=true;
+  group.add(sensorPost);
+
+  const sensorHead = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15,0.15,0.15),
+    new THREE.MeshPhongMaterial({color:0x00aaff,emissive:0x001122,emissiveIntensity:.8})
+  );
+  sensorHead.position.set(-0.6,1.25,-6.5);
+  sensorHead.castShadow=true;sensorHead.receiveShadow=true;
+  group.add(sensorHead);
+
+  // inspection tunnel / camera
+  const tunnel = new THREE.Mesh(
+    new THREE.BoxGeometry(2.2,1.2,1.5),
+    new THREE.MeshPhongMaterial({color:0x202020,emissive:0x000033,emissiveIntensity:.2})
+  );
+  tunnel.position.set(0,1.6,-1);
+  tunnel.castShadow=true;tunnel.receiveShadow=true;
+  group.add(tunnel);
+
+  const camHead = new THREE.Mesh(
+    new THREE.BoxGeometry(.3,.2,.3),
+    new THREE.MeshPhongMaterial({color:0x00ffff,emissive:0x002244,emissiveIntensity:.7})
+  );
+  camHead.position.set(0,1.2,-1);
+  camHead.castShadow=true;camHead.receiveShadow=true;
+  group.add(camHead);
+
+  // diverter arm
+  const diverterArm = new THREE.Mesh(
+    new THREE.BoxGeometry(.1,.4,1),
+    new THREE.MeshPhongMaterial({color:0xffff00, shininess:40})
+  );
+  diverterArm.position.set(.9,1.0,2);
+  diverterArm.castShadow=true;diverterArm.receiveShadow=true;
+  group.add(diverterArm);
+
+  // PASS bin
+  (function(){
+    const gbin = new THREE.Group();
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(2,.2,2),
+      new THREE.MeshPhongMaterial({color:0x003300})
+    );
+    base.position.set(0,0,0); gbin.add(base);
+
+    const wallMat = new THREE.MeshPhongMaterial({color:0x00aa44});
+    const wL = new THREE.Mesh(new THREE.BoxGeometry(.1,1,2), wallMat);
+    wL.position.set(-.95,.6,0); gbin.add(wL);
+    const wR=wL.clone(); wR.position.x=.95; gbin.add(wR);
+    const wF=new THREE.Mesh(new THREE.BoxGeometry(2,1,.1), wallMat);
+    wF.position.set(0,.6,.95); gbin.add(wF);
+
+    gbin.position.set(0,0.75,4);
+    gbin.castShadow=true;gbin.receiveShadow=true;
+    group.add(gbin);
+
+    const label = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.4,.4),
+      new THREE.MeshBasicMaterial({color:0x00ff66, side:THREE.DoubleSide})
+    );
+    label.position.set(0,2.0,4);
+    group.add(label);
+  })();
+
+  // REJECT bin (side)
+  (function(){
+    const rbin = new THREE.Group();
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(2,.2,2),
+      new THREE.MeshPhongMaterial({color:0x330000})
+    );
+    base.position.set(0,0,0); rbin.add(base);
+
+    const wallMat = new THREE.MeshPhongMaterial({color:0xaa0022});
+    const wL = new THREE.Mesh(new THREE.BoxGeometry(.1,1,2), wallMat);
+    wL.position.set(-.95,.6,0); rbin.add(wL);
+    const wR=wL.clone(); wR.position.x=.95; rbin.add(wR);
+    const wF=new THREE.Mesh(new THREE.BoxGeometry(2,1,.1), wallMat);
+    wF.position.set(0,.6,.95); rbin.add(wF);
+
+    rbin.position.set(2.5,0.75,4);
+    rbin.castShadow=true;rbin.receiveShadow=true;
+    group.add(rbin);
+
+    const label = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.6,.4),
+      new THREE.MeshBasicMaterial({color:0xff0033, side:THREE.DoubleSide})
+    );
+    label.position.set(2.5,2.0,4);
+    group.add(label);
+  })();
+
+  // guarded reject zone fence
+  makeSafetyFenceRect(group, [
+    {x:2.0,z:3.2},
+    {x:3.0,z:3.2},
+    {x:3.0,z:5.0},
+    {x:2.0,z:5.0}
+  ], 0xffcc00);
+
+  // IO / control cabinet
+  const ioCab = new THREE.Mesh(
+    new THREE.BoxGeometry(0.6,1.2,0.4),
+    new THREE.MeshPhongMaterial({color:0xcccccc,shininess:30})
+  );
+  ioCab.position.set(-2,1.0,1.5);
+  ioCab.castShadow=true;ioCab.receiveShadow=true;
+  group.add(ioCab);
+
+  // tower light
+  const tower = makeTowerLight(group, new THREE.Vector3(-2,0,1.5));
+
+  // arrows on belt (flow direction)
+  for(let z=-7; z<=4; z+=2.5){
+    const arrow = new THREE.Mesh(
+      new THREE.PlaneGeometry(.6,.8),
+      new THREE.MeshBasicMaterial({color:0x4a6aff, side:THREE.DoubleSide})
+    );
+    arrow.rotation.x = -Math.PI/2;
+    arrow.position.set(0,0.83,z);
+    group.add(arrow);
+  }
+
+  function spawnPart(){
+    if(delayMode) return; // delay mode = no new product on belt
+    const isGood = Math.random()>0.2;
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(.5,.5,.5),
+      new THREE.MeshPhongMaterial({
+        color: isGood?0x00ff66:0xff0033,
+        shininess:60
+      })
+    );
+    mesh.castShadow=true;mesh.receiveShadow=true;
+    mesh.position.set(0,0.9,-8);
+    group.add(mesh);
+
+    parts.push({
+      mesh,
+      isGood,
+      decided:false,
+      phase:'belt',         // 'belt','divertReject','passBin','rejectBin'
+      zSpeed:0.05,
+      xSpeed:0,
+      ttl:600
+    });
+  }
+
+  function tick(dtMs){
+    spawnTimer += dtMs;
+    if(spawnTimer>2000){
+      spawnTimer=0;
+      spawnPart();
+    }
+
+    for(let i=parts.length-1;i>=0;i--){
+      const p=parts[i];
+      const m=p.mesh;
+
+      if(p.phase==='belt'){
+        m.position.z += p.zSpeed;
+
+        if(m.position.z>=1.8 && !p.decided){
+          p.decided=true;
+          if(p.isGood){
+            lastDecision='PASS';
+            rejectStreak=0;
+          }else{
+            lastDecision='REJECT';
+            p.phase='divertReject';
+            p.xSpeed=0.05;
+            diverterArm.rotation.y=-0.8;
+            rejectStreak++;
+          }
+        }
+
+        if(p.isGood && m.position.z>=4){
+          p.phase='passBin';
+          goodCount++;
+        }
+
+      } else if(p.phase==='divertReject'){
+        m.position.z += 0.03;
+        m.position.x += p.xSpeed;
+
+        if(m.position.x>1.5 && m.position.z>3.0){
+          p.phase='rejectBin';
+          badCount++;
+        }
+
+      } else if(p.phase==='passBin' || p.phase==='rejectBin'){
+        m.position.y -= 0.01;
+        if(m.position.y<0.6){
+          group.remove(m);
+          parts.splice(i,1);
+          continue;
+        }
+      }
+
+      // let diverter relax
+      if(p.phase!=='divertReject'){
+        if(Math.abs(diverterArm.rotation.y)>0.01){
+          diverterArm.rotation.y*=0.9;
+        } else {
+          diverterArm.rotation.y=0;
+        }
+      }
+
+      p.ttl--;
+      if(p.ttl<=0){
+        group.remove(m);
+        parts.splice(i,1);
+      }
+    }
+
+    // tower + status
+    const t = performance.now();
+    let statusMeta;
+    if(rejectStreak>=ALARM_STREAK){
+      tower.setStatusAlarm(t);
+      statusMeta = {
+        label:"ALARM",
+        bg:"rgba(216,10,46,0.12)",
+        border:"rgba(216,10,46,0.4)",
+        color:"#d80a2e"
+      };
+    } else if(delayMode){
+      tower.setStatusDelay(t);
+      statusMeta = {
+        label:"DELAY",
+        bg:"rgba(181,137,0,0.12)",
+        border:"rgba(181,137,0,0.4)",
+        color:"#b58900"
+      };
+    } else if(rejectStreak>=WARN_STREAK){
+      tower.setStatusWarn(t);
+      statusMeta = {
+        label:"WARN",
+        bg:"rgba(181,137,0,0.12)",
+        border:"rgba(181,137,0,0.4)",
+        color:"#b58900"
+      };
+    } else {
+      tower.setStatusRunning();
+      statusMeta = {
+        label:"RUNNING",
+        bg:"rgba(0,184,74,0.10)",
+        border:"rgba(0,184,74,0.4)",
+        color:"#00b84a"
+      };
+    }
+
+    // expose getters updated each tick
+    cellStatus = statusMeta;
+  }
+
+  let cellStatus = {
+    label:"RUNNING",
+    bg:"rgba(0,184,74,0.10)",
+    border:"rgba(0,184,74,0.4)",
+    color:"#00b84a"
+  };
+
+  function getKPIs(){
+    return {
+      good:goodCount,
+      bad:badCount,
+      active:parts.length,
+      streak:rejectStreak,
+      lastText:lastDecision
+    };
+  }
+
+  function getStatus(){ return cellStatus; }
+
+  function toggleDelay(){
+    delayMode = !delayMode;
+  }
+  function setDelay(flag){
+    delayMode = !!flag;
+  }
+  function getDelay(){
+    return delayMode;
+  }
+
+  return {
+    name:"Sorting Cell",
+    group,
+    tick,
+    toggleDelay,
+    setDelay,
+    getDelay,
+    getKPIs,
+    getStatus
+  };
+}
+
+/* ---------- PALLETIZING CELL (robot + pallet + fence) ---------- */
+function buildPackagingCell(offsetX){
+  const group = new THREE.Group();
+  group.position.set(offsetX,0,0);
+  scene.add(group);
+
+  let delayMode = false;
+  let boxes = [];
+  let placedCount = 0;
+  let spawnTimer = 0;
+  let robotBaseRot = 0;
+
+  // pallet
+  const pallet = new THREE.Mesh(
+    new THREE.BoxGeometry(2,0.15,2),
+    new THREE.MeshPhongMaterial({color:0x442200,shininess:10})
+  );
+  pallet.position.set(1,0.15,0);
+  pallet.castShadow=true;pallet.receiveShadow=true;
+  group.add(pallet);
+
+  // infeed conveyor (carton feed)
+  const feedBelt = new THREE.Mesh(
+    new THREE.BoxGeometry(3,0.15,1),
+    new THREE.MeshPhongMaterial({color:0x2f2f2f,shininess:20})
+  );
+  feedBelt.position.set(-3,0.6,0);
+  feedBelt.castShadow=true;feedBelt.receiveShadow=true;
+  group.add(feedBelt);
+
+  function smallLeg(x,z){
+    const leg=new THREE.Mesh(
+      new THREE.BoxGeometry(.12,.6,.12),
+      new THREE.MeshPhongMaterial({color:0x777777,shininess:60})
+    );
+    leg.position.set(x,0.3,z);
+    leg.castShadow=true;leg.receiveShadow=true;
+    group.add(leg);
+  }
+  smallLeg(-4,0.4); smallLeg(-2,0.4);
+  smallLeg(-4,-0.4); smallLeg(-2,-0.4);
+
+  // 4-axis palletizing robot
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.6,0.6,0.4,16),
+    new THREE.MeshPhongMaterial({color:0x2f2f2f,shininess:30})
+  );
+  base.position.set(-1,0.4,0);
+  base.castShadow=true;base.receiveShadow=true;
+  group.add(base);
+
+  const shoulder = new THREE.Mesh(
+    new THREE.BoxGeometry(0.4,1.2,0.4),
+    new THREE.MeshPhongMaterial({color:0xaaaaaa,emissive:0x111111,emissiveIntensity:.2})
+  );
+  shoulder.castShadow=true;shoulder.receiveShadow=true;
+  group.add(shoulder);
+
+  const elbow = new THREE.Mesh(
+    new THREE.BoxGeometry(0.35,1.0,0.35),
+    new THREE.MeshPhongMaterial({color:0xcccccc,emissive:0x222222,emissiveIntensity:.2})
+  );
+  elbow.castShadow=true;elbow.receiveShadow=true;
+  group.add(elbow);
+
+  const wrist = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3,0.3,0.6),
+    new THREE.MeshPhongMaterial({color:0xffff00,shininess:50})
+  );
+  wrist.castShadow=true;wrist.receiveShadow=true;
+  group.add(wrist);
+
+  // tower
+  const tower = makeTowerLight(group, new THREE.Vector3(-2,0,1.5));
+
+  // safety fence & cell boundary
+  makeSafetyFenceRect(group, [
+    {x:-2.5,z:-1.5},
+    {x: 2.5,z:-1.5},
+    {x: 2.5,z: 1.5},
+    {x:-2.5,z: 1.5}
+  ], 0xffcc00);
+
+  function nextStackTarget(){
+    const idx = placedCount % 9;       // 3x3 grid
+    const layer = Math.floor(placedCount / 9); // stack layers
+    const gx = (idx % 3) - 1;
+    const gz = Math.floor(idx/3) - 1;
+    return new THREE.Vector3(
+      1 + gx*0.7,
+      0.55 + layer*0.45,
+      gz*0.7
+    );
+  }
+
+  function spawnBox(){
+    if(delayMode) return; // delay stops new feed
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(0.6,0.4,0.6),
+      new THREE.MeshPhongMaterial({color:0xffaa33,shininess:20})
+    );
+    box.castShadow=true;box.receiveShadow=true;
+    // start at far left on conveyor
+    box.position.set(-4.5,0.8,0);
+    group.add(box);
+    boxes.push({
+      mesh:box,
+      phase:'onfeed', // onfeed -> picked -> carry -> placed
+      targetPos:null
+    });
+  }
+
+  function tick(dtMs){
+    spawnTimer += dtMs;
+    if(spawnTimer>2500){
+      spawnTimer=0;
+      spawnBox();
+    }
+
+    // simple robot IK-ish motion
+    robotBaseRot += dtMs*0.0005;
+    const shoulderBase = new THREE.Vector3(-1,1.4,0);
+    shoulder.position.copy(shoulderBase);
+
+    const elbowBase = shoulderBase.clone().add(new THREE.Vector3(
+      0,
+      0.8,
+      0.4*Math.sin(robotBaseRot)
+    ));
+    elbow.position.copy(elbowBase);
+
+    const wristPos = elbowBase.clone().add(new THREE.Vector3(
+      1.2,
+      0.6*Math.cos(robotBaseRot*1.3),
+      0
+    ));
+    wrist.position.copy(wristPos);
+
+    // move boxes
+    for(let b of boxes){
+      if(b.phase==='onfeed'){
+        // slide toward robot pick point (-2,0)
+        b.mesh.position.x += (delayMode?0:0.01);
+        if(b.mesh.position.x >= -2.0){
+          b.phase='picked';
+        }
+      } else if(b.phase==='picked'){
+        // move box under wrist gripper
+        b.mesh.position.lerp(wrist.position,0.3);
+        if(!b.targetPos){
+          b.targetPos = nextStackTarget();
+        }
+        if(b.mesh.position.distanceTo(wrist.position)<0.2){
+          b.phase='carry';
+        }
+      } else if(b.phase==='carry'){
+        // go to pallet position
+        b.mesh.position.lerp(b.targetPos,0.08);
+        if(b.mesh.position.distanceTo(b.targetPos)<0.05){
+          b.phase='placed';
+          placedCount++;
+        }
+      } else if(b.phase==='placed'){
+        // stays
+      }
+    }
+
+    // tower / status
+    let statusMeta;
+    if(delayMode){
+      tower.setStatusDelay(performance.now());
+      statusMeta = {
+        label:"DELAY",
+        bg:"rgba(181,137,0,0.12)",
+        border:"rgba(181,137,0,0.4)",
+        color:"#b58900"
+      };
+    } else {
+      tower.setStatusRunning();
+      statusMeta = {
+        label:"RUNNING",
+        bg:"rgba(0,184,74,0.10)",
+        border:"rgba(0,184,74,0.4)",
+        color:"#00b84a"
+      };
+    }
+    cellStatus = statusMeta;
+  }
+
+  let cellStatus = {
+    label:"RUNNING",
+    bg:"rgba(0,184,74,0.10)",
+    border:"rgba(0,184,74,0.4)",
+    color:"#00b84a"
+  };
+
+  function getKPIs(){
+    const placedBoxes = boxes.filter(o=>o.phase==='placed').length;
+    const activeBoxes = boxes.length - placedBoxes;
+    return {
+      good:placedBoxes,
+      bad:0,
+      active:activeBoxes,
+      streak:0,
+      lastText: delayMode ? "DELAY ACTIVE" : "PALLETIZING"
+    };
+  }
+  function getStatus(){ return cellStatus; }
+
+  function toggleDelay(){ delayMode = !delayMode; }
+  function setDelay(f){ delayMode = !!f; }
+  function getDelay(){ return delayMode; }
+
+  return {
+    name:"Palletizing Cell",
+    group,
+    tick,
+    toggleDelay,
+    setDelay,
+    getDelay,
+    getKPIs,
+    getStatus
+  };
+}
+
+/* ---------- CNC CELL (enclosed machining center) ---------- */
+function buildCNCCell(offsetX){
+  const group = new THREE.Group();
+  group.position.set(offsetX,0,0);
+  scene.add(group);
+
+  let delayMode = false;
+  let cycleCount = 0;
+  let cycleTimer = 0;
+  let spindleY = 1.2;
+  let spindleDir = 1;
+
+  // CNC body enclosure
+  const cncBody = new THREE.Mesh(
+    new THREE.BoxGeometry(3,2,2),
+    new THREE.MeshPhongMaterial({color:0xdddddd,shininess:20})
+  );
+  cncBody.position.set(0,1,0);
+  cncBody.castShadow=true;cncBody.receiveShadow=true;
+  group.add(cncBody);
+
+  // table
+  const table = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6,0.2,1.2),
+    new THREE.MeshPhongMaterial({color:0x555555,shininess:50})
+  );
+  table.position.set(0,0.6,0);
+  table.castShadow=true;table.receiveShadow=true;
+  group.add(table);
+
+  // workpiece
+  const workpiece = new THREE.Mesh(
+    new THREE.BoxGeometry(0.6,0.3,0.6),
+    new THREE.MeshPhongMaterial({color:0x888899,shininess:80})
+  );
+  workpiece.position.set(0,0.85,0);
+  workpiece.castShadow=true;workpiece.receiveShadow=true;
+  group.add(workpiece);
+
+  // spindle head
+  const spindle = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.15,0.15,0.6,16),
+    new THREE.MeshPhongMaterial({color:0x222222,shininess:80,emissive:0x111111,emissiveIntensity:.2})
+  );
+  spindle.rotation.z = Math.PI/2;
+  spindle.position.set(0,spindleY,0.6);
+  spindle.castShadow=true;spindle.receiveShadow=true;
+  group.add(spindle);
+
+  // door frame + sliding door
+  const doorFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(3,2,0.1),
+    new THREE.MeshPhongMaterial({color:0xcccccc,shininess:10})
+  );
+  doorFrame.position.set(0,1,1.05);
+  doorFrame.castShadow=true;doorFrame.receiveShadow=true;
+  group.add(doorFrame);
+
+  const doorPanel = new THREE.Mesh(
+    new THREE.BoxGeometry(1.4,1.2,0.05),
+    new THREE.MeshPhongMaterial({
+      color:0x88aaff,
+      transparent:true,
+      opacity:0.3,
+      shininess:100,
+      emissive:0x112244,
+      emissiveIntensity:0.2
+    })
+  );
+  doorPanel.castShadow=false;doorPanel.receiveShadow=false;
+  group.add(doorPanel);
+
+  // tower light
+  const tower = makeTowerLight(group, new THREE.Vector3(-1.5,0,1));
+
+  // small safety fence in front
+  makeSafetyFenceRect(group, [
+    {x:-2,z:-1.5},
+    {x: 2,z:-1.5},
+    {x: 2,z:-0.5},
+    {x:-2,z:-0.5},
+  ], 0xffcc00);
+
+  function tick(dtMs){
+    // simulate machining cycle if not delayed
+    cycleTimer += dtMs;
+    if(!delayMode && cycleTimer>4000){
+      cycleTimer=0;
+      cycleCount++;
+    }
+
+    // spindle movement
+    spindleY += spindleDir * dtMs*0.0004;
+    if(spindleY>1.4){ spindleY=1.4; spindleDir=-1; }
+    if(spindleY<0.9){ spindleY=0.9; spindleDir= 1; }
+    spindle.position.y = spindleY;
+
+    // door open early in cycle (loading), then close
+    const doorTargetOpen = (!delayMode && cycleTimer<800) ? 1 : 0;
+    doorPos += (doorTargetOpen - doorPos)*0.1;
+    doorPanel.position.set(-0.7 + 1.4*doorPos, 1.0, 1.08);
+
+    // tower/status
+    let statusMeta;
+    if(delayMode){
+      tower.setStatusDelay(performance.now());
+      statusMeta = {
+        label:"DELAY",
+        bg:"rgba(181,137,0,0.12)",
+        border:"rgba(181,137,0,0.4)",
+        color:"#b58900"
+      };
+    } else {
+      tower.setStatusRunning();
+      statusMeta = {
+        label:"RUNNING",
+        bg:"rgba(0,184,74,0.10)",
+        border:"rgba(0,184,74,0.4)",
+        color:"#00b84a"
+      };
+    }
+    cellStatus = statusMeta;
+  }
+
+  let doorPos = 0;
+  let cellStatus = {
+    label:"RUNNING",
+    bg:"rgba(0,184,74,0.10)",
+    border:"rgba(0,184,74,0.4)",
+    color:"#00b84a"
+  };
+
+  function getKPIs(){
+    return {
+      good:cycleCount,
+      bad:0,
+      active:1,
+      streak:cycleTimer|0, // ms since cycle start
+      lastText: delayMode ? "HOLDING" : "MACHINING"
+    };
+  }
+  function getStatus(){ return cellStatus; }
+
+  function toggleDelay(){ delayMode = !delayMode; }
+  function setDelay(f){ delayMode = !!f; }
+  function getDelay(){ return delayMode; }
+
+  return {
+    name:"CNC Machining Cell",
+    group,
+    tick,
+    toggleDelay,
+    setDelay,
+    getDelay,
+    getKPIs,
+    getStatus
+  };
+}
+
+/* ====== BUILD ALL CELLS ON THE FLOOR AT ONCE ====== */
+
+const cellSorting    = buildSortingCell(-20); // left
+const cellPackaging  = buildPackagingCell(0); // middle
+const cellCNC        = buildCNCCell(20);      // right
+
+// This list is our plant floor
+const cells = {
+  sorting:   cellSorting,
+  packaging: cellPackaging,
+  cnc:       cellCNC
+};
+
+// Which one is currently selected in the side panel?
+let activeKey = "sorting";
+
+/* ====== UI BINDINGS ====== */
+
+function refreshPanelFromActiveCell(){
+  const cell = cells[activeKey];
+  if(!cell) return;
+
+  // name
+  panelCellName.textContent = cell.name;
+
+  // KPIs
+  const k = cell.getKPIs();
+  goodCountEl.textContent   = k.good;
+  badCountEl.textContent    = k.bad;
+  activeCountEl.textContent = k.active;
+  streakEl.textContent      = k.streak;
+  lastDecisionEl.textContent= k.lastText;
+
+  // delay button appearance matches that cell's delay
+  const d = cell.getDelay();
+  btnDelay.classList.toggle('active', d);
+  btnDelay.textContent = d ? "▶ Resume feed" : "⏸ Delay feed";
+
+  // status chip reflects that cell's tower light logic
+  const st = cell.getStatus(performance.now());
+  statusChipEl.textContent      = st.label;
+  statusChipEl.style.background = st.bg;
+  statusChipEl.style.borderColor= st.border;
+  statusChipEl.style.color      = st.color;
+}
+
+cellSelect.addEventListener('change', e=>{
+  activeKey = e.target.value;
+  refreshPanelFromActiveCell();
+});
+
+btnDelay.addEventListener('click', ()=>{
+  const cell = cells[activeKey];
+  if(!cell) return;
+  cell.toggleDelay();
+  refreshPanelFromActiveCell();
+});
+
+window.addEventListener('keydown', e=>{
+  if(e.key.toLowerCase()==='d'){
+    const cell = cells[activeKey];
+    if(!cell) return;
+    cell.toggleDelay();
+    refreshPanelFromActiveCell();
+  }
+});
+
+/* ====== MAIN LOOP ====== */
+
+let lastT = performance.now();
+function animate(){
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = now - lastT;
+  lastT = now;
+
+  controls.update();
+
+  // tick ALL machines so they keep running in parallel
+  cellSorting.tick(dt);
+  cellPackaging.tick(dt);
+  cellCNC.tick(dt);
+
+  // update KPIs / status for whichever machine is selected
+  refreshPanelFromActiveCell();
+
+  renderer.render(scene, camera);
+}
+animate();
+
+/* ====== RESIZE ====== */
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

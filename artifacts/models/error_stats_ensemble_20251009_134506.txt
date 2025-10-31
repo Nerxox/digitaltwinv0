@@ -1,0 +1,11 @@
+Error Statistics for ENSEMBLE
+==================================================
+Mean Error: 0.8220
+Median Error: 0.5795
+Std Dev of Errors: 2.5268
+Skewness: 1.2578
+Kurtosis: 3.5429
+5th Percentile: -3.0159
+95th Percentile: 4.5303
+MAE: 1.8508
+RMSE: 2.6572

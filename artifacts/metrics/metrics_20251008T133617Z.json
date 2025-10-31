@@ -1,0 +1,79 @@
+{
+  "timestamp": "20251008T133617Z",
+  "results": [
+    {
+      "horizon": 1,
+      "mape": 8.366299420595169,
+      "rmse": 2.2840249937597314,
+      "model_path": "artifacts\\models\\lstm_h1_20251008T133617Z.keras",
+      "scaler_path": "artifacts\\models\\scaler_h1_20251008T133617Z.pkl",
+      "figures": {
+        "loss": "artifacts\\figures\\loss_curve_h1_20251008T133617Z.pdf",
+        "pred_vs_actual": "artifacts\\figures\\pred_vs_actual_h1_20251008T133617Z.pdf",
+        "daily_mean_power": "artifacts\\figures\\daily_mean_power_h1_20251008T133617Z.pdf"
+      }
+    },
+    {
+      "horizon": 5,
+      "mape": 9.624026715755463,
+      "rmse": 2.57807348951264,
+      "model_path": "artifacts\\models\\lstm_h5_20251008T133617Z.keras",
+      "scaler_path": "artifacts\\models\\scaler_h5_20251008T133617Z.pkl",
+      "figures": {
+        "loss": "artifacts\\figures\\loss_curve_h5_20251008T133617Z.pdf",
+        "pred_vs_actual": "artifacts\\figures\\pred_vs_actual_h5_20251008T133617Z.pdf",
+        "daily_mean_power": "artifacts\\figures\\daily_mean_power_h5_20251008T133617Z.pdf"
+      }
+    },
+    {
+      "horizon": 15,
+      "mape": 9.62332934141159,
+      "rmse": 2.5610001989838964,
+      "model_path": "artifacts\\models\\lstm_h15_20251008T133617Z.keras",
+      "scaler_path": "artifacts\\models\\scaler_h15_20251008T133617Z.pkl",
+      "figures": {
+        "loss": "artifacts\\figures\\loss_curve_h15_20251008T133617Z.pdf",
+        "pred_vs_actual": "artifacts\\figures\\pred_vs_actual_h15_20251008T133617Z.pdf",
+        "daily_mean_power": "artifacts\\figures\\daily_mean_power_h15_20251008T133617Z.pdf"
+      }
+    },
+    {
+      "horizon": 30,
+      "mape": 9.927566349506378,
+      "rmse": 2.577004761501616,
+      "model_path": "artifacts\\models\\lstm_h30_20251008T133617Z.keras",
+      "scaler_path": "artifacts\\models\\scaler_h30_20251008T133617Z.pkl",
+      "figures": {
+        "loss": "artifacts\\figures\\loss_curve_h30_20251008T133617Z.pdf",
+        "pred_vs_actual": "artifacts\\figures\\pred_vs_actual_h30_20251008T133617Z.pdf",
+        "daily_mean_power": "artifacts\\figures\\daily_mean_power_h30_20251008T133617Z.pdf"
+      }
+    }
+  ],
+  "summary": {
+    "best_by_mape": {
+      "horizon": 1,
+      "mape": 8.366299420595169,
+      "rmse": 2.2840249937597314,
+      "model_path": "artifacts\\models\\lstm_h1_20251008T133617Z.keras",
+      "scaler_path": "artifacts\\models\\scaler_h1_20251008T133617Z.pkl",
+      "figures": {
+        "loss": "artifacts\\figures\\loss_curve_h1_20251008T133617Z.pdf",
+        "pred_vs_actual": "artifacts\\figures\\pred_vs_actual_h1_20251008T133617Z.pdf",
+        "daily_mean_power": "artifacts\\figures\\daily_mean_power_h1_20251008T133617Z.pdf"
+      }
+    },
+    "best_by_rmse": {
+      "horizon": 1,
+      "mape": 8.366299420595169,
+      "rmse": 2.2840249937597314,
+      "model_path": "artifacts\\models\\lstm_h1_20251008T133617Z.keras",
+      "scaler_path": "artifacts\\models\\scaler_h1_20251008T133617Z.pkl",
+      "figures": {
+        "loss": "artifacts\\figures\\loss_curve_h1_20251008T133617Z.pdf",
+        "pred_vs_actual": "artifacts\\figures\\pred_vs_actual_h1_20251008T133617Z.pdf",
+        "daily_mean_power": "artifacts\\figures\\daily_mean_power_h1_20251008T133617Z.pdf"
+      }
+    }
+  }
+}

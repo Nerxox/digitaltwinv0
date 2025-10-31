@@ -1,0 +1,11 @@
+Error Statistics for LGB
+==================================================
+Mean Error: -0.3440
+Median Error: -0.6066
+Std Dev of Errors: 2.5585
+Skewness: 1.1860
+Kurtosis: 3.1936
+5th Percentile: -4.0268
+95th Percentile: 3.4128
+MAE: 1.9201
+RMSE: 2.5815

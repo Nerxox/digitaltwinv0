@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}3D Stations{% endblock %}
+{% block content %}
+
+<div class="container-fluid p-0 dt3d">
+  <div id="stage" style="position:relative; width:100%; height:calc(100vh - 120px);"></div>
+
+  <style>
+    .dt3d { background:#0b1220; }
+    .dt3d #stage canvas { display:block; }
+    .dt3d #panel { position:fixed; top:80px; left:16px; width:285px; background:rgba(255,255,255,0.92); border:1px solid rgba(0,0,0,0.12); border-radius:12px; box-shadow:0 32px 80px rgba(0,0,0,0.6); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); padding:16px; font-size:13px; line-height:1.4; display:flex; flex-direction:column; gap:12px; z-index:10; }
+    .dt3d .panel-header{display:flex;flex-direction:column;gap:8px}
+    .dt3d .title-row{display:flex;justify-content:space-between;align-items:flex-start}
+    .dt3d .panel-title{line-height:1.2}
+    .dt3d .panel-name{font-size:14px;font-weight:600;letter-spacing:.03em;color:#0b1220}
+    .dt3d .panel-sub{font-size:11px;color:#4a5568;font-weight:400}
+    .dt3d .status-chip{min-width:70px;font-size:11px;line-height:1.2;font-weight:600;text-align:center;border-radius:6px;padding:4px 6px;border:1px solid rgba(0,0,0,0.12);background:#fff;color:#0b1220}
+    .dt3d .machine-picker{display:flex;flex-direction:column;gap:4px}
+    .dt3d .machine-picker label{font-size:11px;color:#4a5568}
+    .dt3d #cellSelect{width:100%;background:#fff;border:1px solid rgba(0,0,0,0.12);border-radius:8px;padding:6px 8px;font-size:12px;color:#0b1220;outline:none;cursor:pointer}
+    .dt3d .kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .dt3d .kpi-card{background:rgba(255,255,255,0.6);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:8px;display:flex;flex-direction:column;min-height:60px}
+    .dt3d .kpi-label{font-size:11px;color:#4a5568;display:flex;justify-content:space-between;line-height:1.2}
+    .dt3d .kpi-value{margin-top:4px;font-size:16px;font-weight:600;letter-spacing:-0.03em;display:flex;align-items:baseline;gap:6px;color:#0b1220}
+    .dt3d .goodVal{color:#00b84a}
+    .dt3d .badVal{color:#d80a2e}
+    .dt3d .neutralVal{color:#0b1220}
+    .dt3d .row-flex{display:flex;justify-content:space-between;font-family:monospace;font-size:12px;background:rgba(255,255,255,0.6);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:8px;color:#0b1220}
+    .dt3d .row-flex span:first-child{color:#4a5568;padding-right:8px}
+    .dt3d .delay-block{display:flex;flex-direction:column;gap:6px}
+    .dt3d #btnDelay{width:100%;padding:8px 10px;border-radius:8px;border:1px solid rgba(0,0,0,0.12);background:#fff;color:#0b1220;cursor:pointer;font-weight:600;font-size:12px;text-align:center}
+    .dt3d #btnDelay.active{background:#fff8d2;color:#b58900;border-color:#b58900}
+    .dt3d .delay-hint{font-size:11px;color:#4a5568;line-height:1.4}
+    .dt3d .legend-block{background:rgba(255,255,255,0.6);border:1px solid rgba(0,0,0,0.08);border-radius:8px;padding:8px;font-size:11px;color:#0b1220;line-height:1.4}
+    .dt3d .legend-line{display:flex;align-items:flex-start;margin-bottom:4px;gap:6px;font-size:11px;line-height:1.4;color:#0b1220}
+    .dt3d .dot{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+    .dt3d .dot.pass{background:#00ff66}
+    .dt3d .dot.reject{background:#ff0033}
+    .dt3d .hint-block{font-size:10px;color:#4a5568;line-height:1.4}
+    .dt3d .hint-block b{color:#0b1220;font-weight:500}
+    @media (max-width: 992px){ .dt3d #panel{top:72px;left:12px;width:260px} }
+  </style>
+
+  <div id="panel">
+    <div class="panel-header">
+      <div class="title-row">
+        <div class="panel-title">
+          <div id="panelCellName" class="panel-name">Sorting Cell</div>
+          <div class="panel-sub">Digital Twin View</div>
+        </div>
+        <div id="statusChip" class="status-chip">RUNNING</div>
+      </div>
+      <div class="machine-picker">
+        <label for="cellSelect">Cell / Machine</label>
+        <select id="cellSelect">
+          <option value="sorting">Sorting Cell</option>
+          <option value="packaging">Palletizing Cell</option>
+          <option value="cnc">CNC Machining Cell</option>
+        </select>
+      </div>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-label"><span>Good / Pass</span><span style="color:#00b84a">✔</span></div><div class="kpi-value"><span id="goodCount" class="goodVal">0</span><span style="font-size:11px;color:#4a5568;">pcs</span></div></div>
+      <div class="kpi-card"><div class="kpi-label"><span>Reject / Scrap</span><span style="color:#d80a2e">✖</span></div><div class="kpi-value"><span id="badCount" class="badVal">0</span><span style="font-size:11px;color:#4a5568;">pcs</span></div></div>
+      <div class="kpi-card"><div class="kpi-label"><span>In Process</span><span style="color:#4a5568">↻</span></div><div class="kpi-value"><span id="activeCount" class="neutralVal">0</span><span style="font-size:11px;color:#4a5568;">pcs</span></div></div>
+      <div class="kpi-card"><div class="kpi-label"><span>Reject Streak / Cycle</span><span style="color:#b58900">!</span></div><div class="kpi-value"><span id="streak" class="neutralVal">0</span><span style="font-size:11px;color:#4a5568;">cnt</span></div></div>
+    </div>
+    <div class="row-flex"><span>Last decision / State</span><span id="lastDecision" style="text-align:right;">—</span></div>
+    <div class="delay-block">
+      <button id="btnDelay" title="Toggle delay (keyboard: D)">⏸ Delay feed</button>
+      <div class="delay-hint">Delay pauses new load into this selected cell only. Use this during energy peak shaving / controlled stop.</div>
+    </div>
+    <div class="legend-block">
+      <div class="legend-line"><span class="dot pass"></span><span><strong>PASS</strong> → forward/outfeed/next step</span></div>
+      <div class="legend-line"><span class="dot reject"></span><span><strong>REJECT</strong> → diverted to scrap bin</span></div>
+      <div class="hint-block">Drag rotate • Wheel zoom • Right click pan • <b>D</b> toggle delay</div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    // OrbitControls (inline, minimized changes)
+    function OrbitControls(object, domElement){
+      this.object=object; this.domElement=domElement;
+      this.enabled=true; this.target=new THREE.Vector3(0,1,0);
+      this.minDistance=2; this.maxDistance=60;
+      this.minPolarAngle=0; this.maxPolarAngle=Math.PI*0.49;
+      this.enableDamping=true; this.dampingFactor=.08;
+      this.enableZoom=true; this.zoomSpeed=1;
+      this.enableRotate=true; this.rotateSpeed=.4;
+      this.enablePan=true; this.panSpeed=.4;
+      const scope=this,STATE={NONE:-1,ROTATE:0,DOLLY:1,PAN:2}; let state=STATE.NONE;
+      const sph=new THREE.Spherical(),dSph=new THREE.Spherical();let scale=1,panOff=new THREE.Vector3();
+      const rS=new THREE.Vector2(),rE=new THREE.Vector2(),rD=new THREE.Vector2();
+      const pS=new THREE.Vector2(),pE=new THREE.Vector2(),pD=new THREE.Vector2();
+      const dS=new THREE.Vector2(),dE=new THREE.Vector2(),dD=new THREE.Vector2();
+      this.update=function(){
+        const off=new THREE.Vector3();off.copy(scope.object.position).sub(scope.target);
+        sph.setFromVector3(off);
+        if(scope.enableDamping){sph.theta+=dSph.theta*scope.dampingFactor; sph.phi+=dSph.phi*scope.dampingFactor;} else {sph.theta+=dSph.theta; sph.phi+=dSph.phi;}
+        sph.phi=Math.max(scope.minPolarAngle,Math.min(scope.maxPolarAngle,sph.phi));sph.makeSafe();
+        sph.radius*=scale;sph.radius=Math.max(scope.minDistance,Math.min(scope.maxDistance,sph.radius));
+        if(scope.enableDamping){scope.target.addScaledVector(panOff,scope.dampingFactor);} else {scope.target.add(panOff);} off.setFromSpherical(sph);off.add(scope.target);scope.object.position.copy(off);scope.object.lookAt(scope.target);
+        if(scope.enableDamping){dSph.theta*=(1-scope.dampingFactor);dSph.phi*=(1-scope.dampingFactor);panOff.multiplyScalar(1-scope.dampingFactor);} else {dSph.set(0,0,0);panOff.set(0,0,0);} scale=1;
+      };
+      function pan(dx,dy){ const el=scope.domElement; const off=new THREE.Vector3(); off.copy(scope.object.position).sub(scope.target); const dist=off.length()*Math.tan((scope.object.fov/2)*Math.PI/180); const panX=2*dx*dist/el.clientHeight, panY=2*dy*dist/el.clientHeight; const xAx=new THREE.Vector3().setFromMatrixColumn(scope.object.matrix,0).multiplyScalar(-panX); const yAx=new THREE.Vector3().setFromMatrixColumn(scope.object.matrix,1).multiplyScalar(panY); panOff.add(xAx).add(yAx); }
+      function dollyIn(){scale/=1.1;} function dollyOut(){scale*=1.1;}
+      function onDown(e){ if(!scope.enabled)return; if(e.button===0&&scope.enableRotate){rS.set(e.clientX,e.clientY);state=STATE.ROTATE;} if(e.button===1&&scope.enableZoom){dS.set(e.clientX,e.clientY);state=STATE.DOLLY;} if(e.button===2&&scope.enablePan){pS.set(e.clientX,e.clientY);state=STATE.PAN;} domElement.addEventListener('mousemove',onMove);domElement.addEventListener('mouseup',onUp); }
+      function onMove(e){ if(!scope.enabled)return; if(state===STATE.ROTATE&&scope.enableRotate){ rE.set(e.clientX,e.clientY);rD.subVectors(rE,rS).multiplyScalar(scope.rotateSpeed*0.005); dSph.theta-=rD.x;dSph.phi-=rD.y;rS.copy(rE);} if(state===STATE.DOLLY&&scope.enableZoom){ dE.set(e.clientX,e.clientY);dD.subVectors(dE,dS);(dD.y>0?dollyIn():dollyOut());dS.copy(dE);} if(state===STATE.PAN&&scope.enablePan){ pE.set(e.clientX,e.clientY);pD.subVectors(pE,pS).multiplyScalar(scope.panSpeed*0.002); pan(pD.x,pD.y);pS.copy(pE);} }
+      function onUp(){ domElement.removeEventListener('mousemove',onMove); domElement.removeEventListener('mouseup',onUp); state=STATE.NONE; }
+      function onWheel(e){ (e.deltaY<0?dollyOut():dollyIn()); }
+      domElement.addEventListener('mousedown',onDown); domElement.addEventListener('wheel',onWheel,{passive:true}); domElement.addEventListener('contextmenu', e=>e.preventDefault());
+    }
+
+    // Scene setup
+    const stage = document.getElementById('stage');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b1220);
+    const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
+    const renderer = new THREE.WebGLRenderer({antialias:true});
+    stage.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0,1,0); controls.minDistance=5; controls.maxDistance=80; controls.maxPolarAngle=Math.PI*0.49; controls.enableDamping=true; controls.dampingFactor=.08; controls.update();
+
+    function resize(){ const w = stage.clientWidth; const h = stage.clientHeight; renderer.setSize(w, h, false); camera.aspect = w/h || 1; camera.updateProjectionMatrix(); }
+    window.addEventListener('resize', resize);
+
+    // Lights and floor
+    const keyLight = new THREE.DirectionalLight(0xffffff,1.1); keyLight.position.set(10,20,10); keyLight.castShadow=true; scene.add(keyLight);
+    const fillLight = new THREE.HemisphereLight(0x7a8cff, 0x1a1f30, 0.6); scene.add(fillLight);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(100,60), new THREE.MeshPhongMaterial({color:0x1a2338, shininess:10})); floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor);
+    const grid = new THREE.GridHelper(100, 50, 0x3a4a6e, 0x1a2338); grid.position.y=0.01; scene.add(grid);
+
+    // Utility refs to bind KPIs
+    const goodCountEl=document.getElementById('goodCount');
+    const badCountEl=document.getElementById('badCount');
+    const activeCountEl=document.getElementById('activeCount');
+    const streakEl=document.getElementById('streak');
+    const lastDecisionEl=document.getElementById('lastDecision');
+    const statusChipEl=document.getElementById('statusChip');
+    const panelCellName=document.getElementById('panelCellName');
+    const btnDelay=document.getElementById('btnDelay');
+    const cellSelect=document.getElementById('cellSelect');
+
+    function makeHazardTexture(){ const c=document.createElement('canvas'); c.width=128; c.height=64; const g=c.getContext('2d'); g.fillStyle='#222'; g.fillRect(0,0,128,64); for(let i=0;i<8;i++){ g.fillStyle=(i%2===0)?'#ffcc00':'#222'; g.beginPath(); g.moveTo(i*16,0); g.lineTo(i*16+16,0); g.lineTo(i*16,64); g.closePath(); g.fill(); } return new THREE.CanvasTexture(c); }
+    function makeSafetyFenceRect(parent,corners,colorHex){ const mat=new THREE.MeshPhongMaterial({color:colorHex||0xffcc00}); for (let i=0;i<corners.length;i++){ const c=corners[i]; const post=new THREE.Mesh(new THREE.BoxGeometry(.08,1.2,.08),mat); post.position.set(c.x,0.6,c.z); post.castShadow=true;post.receiveShadow=true; parent.add(post);} function rail(p1,p2,h){ const rail=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,1,8),mat); const mid=new THREE.Vector3((p1.x+p2.x)/2,h,(p1.z+p2.z)/2); rail.position.copy(mid); rail.lookAt(p2.x,h,p2.z); rail.rotateX(Math.PI/2); const len=new THREE.Vector3(p2.x-p1.x,0,p2.z-p1.z).length(); rail.scale.set(1,len,1); rail.castShadow=true;rail.receiveShadow=true; parent.add(rail);} for (let i=0;i<corners.length;i++){ const j=(i+1)%corners.length; rail(corners[i],corners[j],1.0); rail(corners[i],corners[j],0.5);} }
+    function makeTowerLight(parent, localPos){ const towerGroup=new THREE.Group(); towerGroup.position.copy(localPos); const pole=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,2,12), new THREE.MeshPhongMaterial({color:0x444444,shininess:20})); pole.position.y=1; pole.castShadow=true; towerGroup.add(pole); function seg(hex,y,inten){ const mat=new THREE.MeshPhongMaterial({color:hex,emissive:hex,emissiveIntensity:inten,shininess:80}); const mesh=new THREE.Mesh(new THREE.CylinderGeometry(.15,.15,.3,16),mat); mesh.position.y=y; mesh.castShadow=true; towerGroup.add(mesh); return mat; } const greenMat=seg(0x00ff55,2.0,.6); const yellowMat=seg(0xffee00,2.4,.15); const redMat=seg(0xff0033,2.8,.05); parent.add(towerGroup); return { setStatusRunning(){greenMat.emissiveIntensity=0.6;yellowMat.emissiveIntensity=0.15;redMat.emissiveIntensity=0.05;}, setStatusDelay(t){const pulse=0.3+0.4*(0.5+0.5*Math.sin(t/400));yellowMat.emissiveIntensity=pulse;redMat.emissiveIntensity=0.05;greenMat.emissiveIntensity=0.05;}, setStatusWarn(t){const pulse=0.25+0.35*(0.5+0.5*Math.sin(t/500));yellowMat.emissiveIntensity=pulse;redMat.emissiveIntensity=0.05;greenMat.emissiveIntensity=0.15;}, setStatusAlarm(t){const flash=0.2+0.8*(0.5+0.5*Math.sin(t/200));redMat.emissiveIntensity=flash;yellowMat.emissiveIntensity=0.1;greenMat.emissiveIntensity=0.05;} }; }
+
+    function buildSortingCell(offsetX){ const group=new THREE.Group(); group.position.set(offsetX,0,0); scene.add(group); let parts=[]; let goodCount=0; let badCount=0; let rejectStreak=0; let lastDecision='—'; let spawnTimer=0; let delayMode=false; const WARN_STREAK=3; const ALARM_STREAK=5; const beltBody=new THREE.Mesh(new THREE.BoxGeometry(2,0.15,14), new THREE.MeshPhongMaterial({color:0x2f2f2f, shininess:20})); beltBody.position.set(0,0.75,-1); beltBody.castShadow=true;beltBody.receiveShadow=true; group.add(beltBody); function sideRail(x){ const rail=new THREE.Mesh(new THREE.BoxGeometry(.08,.5,14), new THREE.MeshPhongMaterial({color:0x9a9a9a, shininess:80})); rail.position.set(x,1.05,-1); rail.castShadow=true;rail.receiveShadow=true; group.add(rail);} sideRail(-1.05); sideRail(1.05); function frameLeg(x,z){ const leg=new THREE.Mesh(new THREE.BoxGeometry(.12,1,.12), new THREE.MeshPhongMaterial({color:0x777777, shininess:60})); leg.position.set(x,0.5,z); leg.castShadow=true;leg.receiveShadow=true; group.add(leg); const foot=new THREE.Mesh(new THREE.BoxGeometry(.4,.05,.4), new THREE.MeshPhongMaterial({color:0x555555})); foot.position.set(x,.03,z); foot.castShadow=true;foot.receiveShadow=true; group.add(foot);} frameLeg(-.8,-6); frameLeg(.8,-2); frameLeg(-.8,2); frameLeg(.8,5); function roller(z,color){ const r=new THREE.Mesh(new THREE.CylinderGeometry(.22,.22,2,20), new THREE.MeshPhongMaterial({color:color||0x444444, shininess:50})); r.rotation.z=Math.PI/2; r.position.set(0,0.75,z); r.castShadow=true;r.receiveShadow=true; group.add(r);} roller(-8); roller(5,0x555577); const motorBox=new THREE.Mesh(new THREE.BoxGeometry(1,.6,.6), new THREE.MeshPhongMaterial({color:0x222244,emissive:0x000022,emissiveIntensity:.3})); motorBox.position.set(1.2,1.0,5); motorBox.castShadow=true;motorBox.receiveShadow=true; group.add(motorBox); const hazardSign=new THREE.Mesh(new THREE.PlaneGeometry(0.5,0.25), new THREE.MeshBasicMaterial({map:makeHazardTexture(), side:THREE.DoubleSide})); hazardSign.position.set(1.7,1.15,5); hazardSign.rotation.y=-Math.PI/2; group.add(hazardSign); const sensorPost=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.5,0.07), new THREE.MeshPhongMaterial({color:0x999999, shininess:80})); sensorPost.position.set(-0.6,1.0,-6.5); sensorPost.castShadow=true;sensorPost.receiveShadow=true; group.add(sensorPost); const sensorHead=new THREE.Mesh(new THREE.BoxGeometry(0.15,0.15,0.15), new THREE.MeshPhongMaterial({color:0x00aaff,emissive:0x001122,emissiveIntensity:.8})); sensorHead.position.set(-0.6,1.25,-6.5); sensorHead.castShadow=true;sensorHead.receiveShadow=true; group.add(sensorHead); const tunnel=new THREE.Mesh(new THREE.BoxGeometry(2.2,1.2,1.5), new THREE.MeshPhongMaterial({color:0x202020,emissive:0x000033,emissiveIntensity:.2})); tunnel.position.set(0,1.6,-1); tunnel.castShadow=true;tunnel.receiveShadow=true; group.add(tunnel); const camHead=new THREE.Mesh(new THREE.BoxGeometry(.3,.2,.3), new THREE.MeshPhongMaterial({color:0x00ffff,emissive:0x002244,emissiveIntensity:.7})); camHead.position.set(0,1.2,-1); camHead.castShadow=true;camHead.receiveShadow=true; group.add(camHead); const diverterArm=new THREE.Mesh(new THREE.BoxGeometry(.1,.4,1), new THREE.MeshPhongMaterial({color:0xffff00, shininess:40})); diverterArm.position.set(.9,1.0,2); diverterArm.castShadow=true;diverterArm.receiveShadow=true; group.add(diverterArm); (function(){ const gbin=new THREE.Group(); const base=new THREE.Mesh(new THREE.BoxGeometry(2,.2,2), new THREE.MeshPhongMaterial({color:0x003300})); base.position.set(0,0,0); gbin.add(base); const wallMat=new THREE.MeshPhongMaterial({color:0x00aa44}); const wL=new THREE.Mesh(new THREE.BoxGeometry(.1,1,2), wallMat); wL.position.set(-.95,.6,0); gbin.add(wL); const wR=wL.clone(); wR.position.x=.95; gbin.add(wR); const wF=new THREE.Mesh(new THREE.BoxGeometry(2,1,.1), wallMat); wF.position.set(0,.6,.95); gbin.add(wF); gbin.position.set(0,0.75,4); gbin.castShadow=true;gbin.receiveShadow=true; group.add(gbin); const label=new THREE.Mesh(new THREE.PlaneGeometry(1.4,.4), new THREE.MeshBasicMaterial({color:0x00ff66, side:THREE.DoubleSide})); label.position.set(0,2.0,4); group.add(label); })(); (function(){ const rbin=new THREE.Group(); const base=new THREE.Mesh(new THREE.BoxGeometry(2,.2,2), new THREE.MeshPhongMaterial({color:0x330000})); base.position.set(0,0,0); rbin.add(base); const wallMat=new THREE.MeshPhongMaterial({color:0xaa0022}); const wL=new THREE.Mesh(new THREE.BoxGeometry(.1,1,2), wallMat); wL.position.set(-.95,.6,0); rbin.add(wL); const wR=wL.clone(); wR.position.x=.95; rbin.add(wR); const wF=new THREE.Mesh(new THREE.BoxGeometry(2,1,.1), wallMat); wF.position.set(0,.6,.95); rbin.add(wF); rbin.position.set(2.5,0.75,4); rbin.castShadow=true;rbin.receiveShadow=true; group.add(rbin); const label=new THREE.Mesh(new THREE.PlaneGeometry(1.6,.4), new THREE.MeshBasicMaterial({color:0xff0033, side:THREE.DoubleSide})); label.position.set(2.5,2.0,4); group.add(label); })(); makeSafetyFenceRect(group,[{x:2.0,z:3.2},{x:3.0,z:3.2},{x:3.0,z:5.0},{x:2.0,z:5.0}],0xffcc00); const ioCab=new THREE.Mesh(new THREE.BoxGeometry(0.6,1.2,0.4), new THREE.MeshPhongMaterial({color:0xcccccc,shininess:30})); ioCab.position.set(-2,1.0,1.5); ioCab.castShadow=true;ioCab.receiveShadow=true; group.add(ioCab); const tower=makeTowerLight(group, new THREE.Vector3(-2,0,1.5)); for(let z=-7; z<=4; z+=2.5){ const arrow=new THREE.Mesh(new THREE.PlaneGeometry(.6,.8), new THREE.MeshBasicMaterial({color:0x4a6aff, side:THREE.DoubleSide})); arrow.rotation.x=-Math.PI/2; arrow.position.set(0,0.83,z); group.add(arrow);} function spawnPart(){ if(delayMode) return; const isGood=Math.random()>0.2; const mesh=new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5), new THREE.MeshPhongMaterial({color:isGood?0x00ff66:0xff0033, shininess:60})); mesh.castShadow=true;mesh.receiveShadow=true; mesh.position.set(0,0.9,-8); group.add(mesh); parts.push({mesh,isGood,decided:false,phase:'belt', zSpeed:0.05,xSpeed:0,ttl:600}); } function tick(dtMs){ spawnTimer+=dtMs; if(spawnTimer>2000){spawnTimer=0;spawnPart();} for(let i=parts.length-1;i>=0;i--){ const p=parts[i]; const m=p.mesh; if(p.phase==='belt'){ m.position.z += p.zSpeed; if(m.position.z>=1.8 && !p.decided){ p.decided=true; if(p.isGood){ lastDecision='PASS'; rejectStreak=0; }else{ lastDecision='REJECT'; p.phase='divertReject'; p.xSpeed=0.05; diverterArm.rotation.y=-0.8; rejectStreak++; } } if(p.isGood && m.position.z>=4){ p.phase='passBin'; goodCount++; } } else if(p.phase==='divertReject'){ m.position.z += 0.03; m.position.x += p.xSpeed; if(m.position.x>1.5 && m.position.z>3.0){ p.phase='rejectBin'; badCount++; } } else if(p.phase==='passBin' || p.phase==='rejectBin'){ m.position.y -= 0.01; if(m.position.y<0.6){ group.remove(m); parts.splice(i,1); continue; } } if(p.phase!=='divertReject'){ if(Math.abs(diverterArm.rotation.y)>0.01){ diverterArm.rotation.y*=0.9; } else { diverterArm.rotation.y=0; } } p.ttl--; if(p.ttl<=0){ group.remove(m); parts.splice(i,1); } } const t=performance.now(); let statusMeta; if(rejectStreak>=5){ tower.setStatusAlarm(t); statusMeta={label:'ALARM', bg:'rgba(216,10,46,0.12)', border:'rgba(216,10,46,0.4)', color:'#d80a2e'}; } else if(delayMode){ tower.setStatusDelay(t); statusMeta={label:'DELAY', bg:'rgba(181,137,0,0.12)', border:'rgba(181,137,0,0.4)', color:'#b58900'}; } else if(rejectStreak>=3){ tower.setStatusWarn(t); statusMeta={label:'WARN', bg:'rgba(181,137,0,0.12)', border:'rgba(181,137,0,0.4)', color:'#b58900'}; } else { tower.setStatusRunning(); statusMeta={label:'RUNNING', bg:'rgba(0,184,74,0.10)', border:'rgba(0,184,74,0.4)', color:'#00b84a'}; } cellStatus=statusMeta; }
+      let cellStatus={label:'RUNNING', bg:'rgba(0,184,74,0.10)', border:'rgba(0,184,74,0.4)', color:'#00b84a'};
+      function getKPIs(){ return {good:goodCount,bad:badCount,active:parts.length,streak:rejectStreak,lastText:lastDecision}; }
+      function getStatus(){ return cellStatus; }
+      function toggleDelay(){ delayMode=!delayMode; }
+      function setDelay(flag){ delayMode=!!flag; }
+      function getDelay(){ return delayMode; }
+      return { name:'Sorting Cell', group, tick, toggleDelay, setDelay, getDelay, getKPIs, getStatus };
+    }
+
+    function buildPackagingCell(offsetX){ const group=new THREE.Group(); group.position.set(offsetX,0,0); scene.add(group); let delayMode=false; let boxes=[]; let placedCount=0; let spawnTimer=0; let robotBaseRot=0; const pallet=new THREE.Mesh(new THREE.BoxGeometry(2,0.15,2), new THREE.MeshPhongMaterial({color:0x442200,shininess:10})); pallet.position.set(1,0.15,0); pallet.castShadow=true;pallet.receiveShadow=true; group.add(pallet); const feedBelt=new THREE.Mesh(new THREE.BoxGeometry(3,0.15,1), new THREE.MeshPhongMaterial({color:0x2f2f2f,shininess:20})); feedBelt.position.set(-3,0.6,0); feedBelt.castShadow=true;feedBelt.receiveShadow=true; group.add(feedBelt); function smallLeg(x,z){ const leg=new THREE.Mesh(new THREE.BoxGeometry(.12,.6,.12), new THREE.MeshPhongMaterial({color:0x777777,shininess:60})); leg.position.set(x,0.3,z); leg.castShadow=true;leg.receiveShadow=true; group.add(leg);} smallLeg(-4,0.4); smallLeg(-2,0.4); smallLeg(-4,-0.4); smallLeg(-2,-0.4); const base=new THREE.Mesh(new THREE.CylinderGeometry(0.6,0.6,0.4,16), new THREE.MeshPhongMaterial({color:0x2f2f2f,shininess:30})); base.position.set(-1,0.4,0); base.castShadow=true;base.receiveShadow=true; group.add(base); const shoulder=new THREE.Mesh(new THREE.BoxGeometry(0.4,1.2,0.4), new THREE.MeshPhongMaterial({color:0xaaaaaa,emissive:0x111111,emissiveIntensity:.2})); shoulder.castShadow=true;shoulder.receiveShadow=true; group.add(shoulder); const elbow=new THREE.Mesh(new THREE.BoxGeometry(0.35,1.0,0.35), new THREE.MeshPhongMaterial({color:0xcccccc,emissive:0x222222,emissiveIntensity:.2})); elbow.castShadow=true;elbow.receiveShadow=true; group.add(elbow); const wrist=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.3,0.6), new THREE.MeshPhongMaterial({color:0xffff00,shininess:50})); wrist.castShadow=true;wrist.receiveShadow=true; group.add(wrist); const tower=makeTowerLight(group, new THREE.Vector3(-2,0,1.5)); makeSafetyFenceRect(group,[{x:-2.5,z:-1.5},{x:2.5,z:-1.5},{x:2.5,z:1.5},{x:-2.5,z:1.5}],0xffcc00); function nextStackTarget(){ const idx=placedCount%9; const layer=Math.floor(placedCount/9); const gx=(idx%3)-1; const gz=Math.floor(idx/3)-1; return new THREE.Vector3(1 + gx*0.7, 0.55 + layer*0.45, gz*0.7);} function spawnBox(){ if(delayMode) return; const box=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.4,0.6), new THREE.MeshPhongMaterial({color:0xffaa33,shininess:20})); box.castShadow=true;box.receiveShadow=true; box.position.set(-4.5,0.8,0); group.add(box); boxes.push({mesh:box,phase:'onfeed',targetPos:null}); } function tick(dtMs){ spawnTimer+=dtMs; if(spawnTimer>2500){spawnTimer=0;spawnBox();} robotBaseRot += dtMs*0.0005; const shoulderBase=new THREE.Vector3(-1,1.4,0); shoulder.position.copy(shoulderBase); const elbowBase=shoulderBase.clone().add(new THREE.Vector3(0,0.8,0.4*Math.sin(robotBaseRot))); elbow.position.copy(elbowBase); const wristPos=elbowBase.clone().add(new THREE.Vector3(1.2,0.6*Math.cos(robotBaseRot*1.3),0)); wrist.position.copy(wristPos); for(let b of boxes){ if(b.phase==='onfeed'){ b.mesh.position.x += (delayMode?0:0.01); if(b.mesh.position.x >= -2.0){ b.phase='picked'; } } else if(b.phase==='picked'){ b.mesh.position.lerp(wrist.position,0.3); if(!b.targetPos){ b.targetPos=nextStackTarget(); } if(b.mesh.position.distanceTo(wrist.position)<0.2){ b.phase='carry'; } } else if(b.phase==='carry'){ b.mesh.position.lerp(b.targetPos,0.08); if(b.mesh.position.distanceTo(b.targetPos)<0.05){ b.phase='placed'; placedCount++; } } }
+      let statusMeta; if(delayMode){ tower.setStatusDelay(performance.now()); statusMeta={label:'DELAY', bg:'rgba(181,137,0,0.12)', border:'rgba(181,137,0,0.4)', color:'#b58900'}; } else { tower.setStatusRunning(); statusMeta={label:'RUNNING', bg:'rgba(0,184,74,0.10)', border:'rgba(0,184,74,0.4)', color:'#00b84a'}; } cellStatus=statusMeta; }
+      let cellStatus={label:'RUNNING', bg:'rgba(0,184,74,0.10)', border:'rgba(0,184,74,0.4)', color:'#00b84a'};
+      function getKPIs(){ const placedBoxes=boxes.filter(o=>o.phase==='placed').length; const activeBoxes=boxes.length - placedBoxes; return {good:placedBoxes,bad:0,active:activeBoxes,streak:0,lastText: delayMode ? 'DELAY ACTIVE' : 'PALLETIZING'}; }
+      function getStatus(){ return cellStatus; }
+      function toggleDelay(){ delayMode=!delayMode; }
+      function setDelay(f){ delayMode=!!f; }
+      function getDelay(){ return delayMode; }
+      return { name:'Palletizing Cell', group, tick, toggleDelay, setDelay, getDelay, getKPIs, getStatus };
+    }
+
+    function buildCNCCell(offsetX){ const group=new THREE.Group(); group.position.set(offsetX,0,0); scene.add(group); let delayMode=false; let cycleCount=0; let cycleTimer=0; let spindleY=1.2; let spindleDir=1; const cncBody=new THREE.Mesh(new THREE.BoxGeometry(3,2,2), new THREE.MeshPhongMaterial({color:0xdddddd,shininess:20})); cncBody.position.set(0,1,0); cncBody.castShadow=true;cncBody.receiveShadow=true; group.add(cncBody); const table=new THREE.Mesh(new THREE.BoxGeometry(1.6,0.2,1.2), new THREE.MeshPhongMaterial({color:0x555555,shininess:50})); table.position.set(0,0.6,0); table.castShadow=true;table.receiveShadow=true; group.add(table); const workpiece=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.3,0.6), new THREE.MeshPhongMaterial({color:0x888899,shininess:80})); workpiece.position.set(0,0.85,0); workpiece.castShadow=true;workpiece.receiveShadow=true; group.add(workpiece); const spindle=new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.15,0.6,16), new THREE.MeshPhongMaterial({color:0x222222,shininess:80,emissive:0x111111,emissiveIntensity:.2})); spindle.rotation.z=Math.PI/2; spindle.position.set(0,spindleY,0.6); spindle.castShadow=true;spindle.receiveShadow=true; group.add(spindle); const doorFrame=new THREE.Mesh(new THREE.BoxGeometry(3,2,0.1), new THREE.MeshPhongMaterial({color:0xcccccc,shininess:10})); doorFrame.position.set(0,1,1.05); doorFrame.castShadow=true;doorFrame.receiveShadow=true; group.add(doorFrame); const doorPanel=new THREE.Mesh(new THREE.BoxGeometry(1.4,1.2,0.05), new THREE.MeshPhongMaterial({color:0x88aaff, transparent:true, opacity:0.3, shininess:100, emissive:0x112244, emissiveIntensity:0.2})); doorPanel.castShadow=false;doorPanel.receiveShadow=false; group.add(doorPanel); const tower=makeTowerLight(group, new THREE.Vector3(-1.5,0,1)); makeSafetyFenceRect(group,[{x:-2,z:-1.5},{x:2,z:-1.5},{x:2,z:-0.5},{x:-2,z:-0.5}],0xffcc00); function tick(dtMs){ cycleTimer+=dtMs; if(!delayMode && cycleTimer>4000){ cycleTimer=0; cycleCount++; } spindleY += spindleDir * dtMs*0.0004; if(spindleY>1.4){ spindleY=1.4; spindleDir=-1; } if(spindleY<0.9){ spindleY=0.9; spindleDir= 1; } spindle.position.y=spindleY; const doorTargetOpen = (!delayMode && cycleTimer<800) ? 1 : 0; doorPos += (doorTargetOpen - doorPos)*0.1; doorPanel.position.set(-0.7 + 1.4*doorPos, 1.0, 1.08); let statusMeta; if(delayMode){ tower.setStatusDelay(performance.now()); statusMeta={label:'DELAY', bg:'rgba(181,137,0,0.12)', border:'rgba(181,137,0,0.4)', color:'#b58900'}; } else { tower.setStatusRunning(); statusMeta={label:'RUNNING', bg:'rgba(0,184,74,0.10)', border:'rgba(0,184,74,0.4)', color:'#00b84a'}; } cellStatus=statusMeta; }
+      let doorPos=0; let cellStatus={label:'RUNNING', bg:'rgba(0,184,74,0.10)', border:'rgba(0,184,74,0.4)', color:'#00b84a'};
+      function getKPIs(){ return {good:cycleCount,bad:0,active:1,streak:(cycleTimer|0), lastText: delayMode ? 'HOLDING' : 'MACHINING'}; }
+      function getStatus(){ return cellStatus; }
+      function toggleDelay(){ delayMode=!delayMode; }
+      function setDelay(f){ delayMode=!!f; }
+      function getDelay(){ return delayMode; }
+      return { name:'CNC Machining Cell', group, tick, toggleDelay, setDelay, getDelay, getKPIs, getStatus };
+    }
+
+    const cellSorting = buildSortingCell(-20);
+    const cellPackaging = buildPackagingCell(0);
+    const cellCNC = buildCNCCell(20);
+    const cells = { sorting:cellSorting, packaging:cellPackaging, cnc:cellCNC };
+    let activeKey='sorting';
+    function refreshPanelFromActiveCell(){ const cell=cells[activeKey]; if(!cell) return; panelCellName.textContent=cell.name; const k=cell.getKPIs(); goodCountEl.textContent=k.good; badCountEl.textContent=k.bad; activeCountEl.textContent=k.active; streakEl.textContent=k.streak; lastDecisionEl.textContent=k.lastText; const d=cell.getDelay(); btnDelay.classList.toggle('active', d); btnDelay.textContent = d ? '▶ Resume feed' : '⏸ Delay feed'; const st=cell.getStatus(performance.now()); statusChipEl.textContent=st.label; statusChipEl.style.background=st.bg; statusChipEl.style.borderColor=st.border; statusChipEl.style.color=st.color; }
+
+    // Link KPIs to API if available
+    async function pullStationKPIs(){
+      try{
+        const r = await fetch('/api/v1/stations');
+        if(!r.ok) return;
+        const j = await r.json();
+        const map = (j.items||[]).reduce((acc,it)=>{ acc[it.id]=it; return acc; },{});
+        // Map remote KPIs into local cells
+        if(map.sorting){ const k=map.sorting.kpi; cellSorting.setDelay(!!k.delay); cellSorting.getKPIs = ()=>k; }
+        if(map.packaging){ const k=map.packaging.kpi; cellPackaging.setDelay(!!k.delay); cellPackaging.getKPIs = ()=>k; }
+        if(map.cnc){ const k=map.cnc.kpi; cellCNC.setDelay(!!k.delay); cellCNC.getKPIs = ()=>k; }
+      }catch(_){ /* ignore */ }
+    }
+    setInterval(pullStationKPIs, 2000);
+    cellSelect.addEventListener('change', e=>{ activeKey=e.target.value; refreshPanelFromActiveCell(); });
+    btnDelay.addEventListener('click', async ()=>{ const cell=cells[activeKey]; if(!cell) return; cell.toggleDelay(); refreshPanelFromActiveCell(); try{ await fetch(`/api/v1/stations/${activeKey}/delay`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({delay: cell.getDelay()})}); }catch(_){ }
+    });
+    window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='d'){ const cell=cells[activeKey]; if(!cell) return; cell.toggleDelay(); refreshPanelFromActiveCell(); } });
+
+    function init(){ const w=stage.clientWidth; const h=stage.clientHeight; camera.position.set(0,12,28); camera.lookAt(0,1,0); renderer.setSize(w,h,false); controls.update(); refreshPanelFromActiveCell(); animate(); }
+    function animate(){ requestAnimationFrame(animate); controls.update(); cellSorting.tick(16); cellPackaging.tick(16); cellCNC.tick(16); renderer.render(scene, camera); }
+    resize(); init();
+  </script>
+</div>
+
+{% endblock %}
+
+

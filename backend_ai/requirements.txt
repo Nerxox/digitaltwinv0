@@ -1,0 +1,28 @@
+fastapi
+uvicorn[standard]
+paho-mqtt
+sqlalchemy
+psycopg2-binary
+pandas
+numpy
+tensorflow==2.10
+scikit-learn
+matplotlib
+deap
+stable-baselines3[extra]
+joblib
+python-multipart
+pydantic[email]
+# Security and authentication
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+# Monitoring and observability
+prometheus-client
+psutil
+# Additional production dependencies
+redis
+celery
+gunicorn
+uvloop
+httpx
