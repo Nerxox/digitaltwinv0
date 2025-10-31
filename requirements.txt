@@ -1,0 +1,15 @@
+# Core Libraries
+fastapi
+uvicorn
+pandas
+numpy
+
+# AI/Prediction
+tensorflow
+
+# Optimization
+deap
+
+# Visualization/Dashboard
+plotly
+dash
