@@ -23,7 +23,7 @@
     "@types/axios": "^0.9.36",
     "@types/react": "^19.1.16",
     "@types/react-dom": "^19.1.9",
-    "@types/recharts": "^0.0.0",
+    "@types/recharts": "^2.0.0",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.36.0",

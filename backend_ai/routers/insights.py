@@ -16,6 +16,7 @@ from backend_ai.common.api_models import (
 )
 from backend_ai.services.model_registry import ModelRegistry
 from backend_ai.routers.evaluate import _load_split, _fetch_series_with_ts
+from backend_ai.services.ga_optimizer import GADigitalTwinOptimizer
 
 router = APIRouter(tags=["insights"]) 
 
@@ -155,7 +156,22 @@ async def maintenance_recommendations(req: MaintenanceRequest):
             actions = ["No immediate action required", "Continue routine checks"]
             level = "Normal"
 
-        items.append(MaintenanceRecItem(machine_id=mid, level=level, rmse=rmse, actions=actions))
+        # --- Optimization Logic ---
+        optimizer = GADigitalTwinOptimizer()
+        optimal_cost, optimal_schedule = optimizer.get_optimal_schedule()
+        
+        # Add optimization recommendation to actions
+        actions.append(f"Optimal 24h schedule cost: ${optimal_cost:.2f}")
+        actions.append("Optimal Schedule Details (see response body for full table)")
+        
+        items.append(MaintenanceRecItem(
+            machine_id=mid, 
+            level=level, 
+            rmse=rmse, 
+            actions=actions,
+            optimal_schedule=optimal_schedule, # Add the full schedule to the response model
+            optimal_cost=optimal_cost
+        ))
 
     return MaintenanceResponse(items=items)
 

@@ -122,6 +122,8 @@ class MaintenanceRecItem(BaseModel):
     level: Literal["Normal", "Low", "Medium", "High"]
     rmse: Optional[float] = None
     actions: List[str]
+    optimal_schedule: Optional[List[Dict]] = None
+    optimal_cost: Optional[float] = None
 
 class MaintenanceRequest(BaseModel):
     machine_id: Optional[Union[str, List[str]]] = None
